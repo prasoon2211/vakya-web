@@ -1,61 +1,125 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0f172a;
-  --color-background-secondary: #0f172a;
-  --color-foreground: #f1f5f9;
-  --color-accent: #6366f1;
-  --color-accent-light: #8b5cf6;
-  --color-muted: #64748b;
-  --color-muted-foreground: #94a3b8;
-  --color-card: rgba(255, 255, 255, 0.03);
-  --color-card-border: rgba(255, 255, 255, 0.06);
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-success: #4ade80;
-  --color-error: #f87171;
+  /* Warm paper-inspired palette */
+  --color-paper: #faf7f2;
+  --color-paper-dark: #f3ede4;
+  --color-paper-darker: #e8dfd3;
+  --color-ink: #1a1a1a;
+  --color-ink-light: #3d3d3d;
+  --color-ink-muted: #6b6b6b;
+  --color-ink-faded: #9a9a9a;
+
+  /* Terracotta - like old book bindings */
+  --color-terracotta: #c45c3e;
+  --color-terracotta-light: #d4765b;
+  --color-terracotta-dark: #a34a30;
+
+  /* Forest green - scholarly accent */
+  --color-forest: #2d5a47;
+  --color-forest-light: #3d7a5f;
+
+  /* Ink blue - for interactive elements */
+  --color-inkblue: #2c4a6e;
+  --color-inkblue-light: #3d6494;
+
+  /* Warm shadows */
+  --shadow-soft: 0 2px 8px rgba(26, 26, 26, 0.06);
+  --shadow-medium: 0 4px 20px rgba(26, 26, 26, 0.08);
+  --shadow-lifted: 0 8px 30px rgba(26, 26, 26, 0.12);
 }
 
 @layer base {
   :root {
-    --background: linear-gradient(145deg, #0f172a 0%, #1e1b4b 100%);
-    --background-secondary: #0f172a;
-    --foreground: #f1f5f9;
-    --accent: #6366f1;
-    --accent-light: #8b5cf6;
-    --muted: #64748b;
-    --muted-foreground: #94a3b8;
-    --card: rgba(255, 255, 255, 0.03);
-    --card-border: rgba(255, 255, 255, 0.06);
-    --border: rgba(255, 255, 255, 0.1);
-    --success: #4ade80;
-    --error: #f87171;
+    --background: #faf7f2;
+    --foreground: #1a1a1a;
+    --accent: #c45c3e;
+    --accent-hover: #d4765b;
+    --muted: #6b6b6b;
+    --border: #e8dfd3;
+    --card: #ffffff;
+    --card-border: #e8dfd3;
   }
 
   html {
-    background: linear-gradient(145deg, #0f172a 0%, #1e1b4b 100%);
+    background: var(--background);
     min-height: 100%;
   }
 
   body {
-    background: transparent;
+    background: var(--background);
     color: var(--foreground);
     font-family: var(--font-dm-sans), system-ui, sans-serif;
-    line-height: 1.6;
+    line-height: 1.7;
     min-height: 100vh;
+  }
+
+  /* Subtle paper texture overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    opacity: 0.015;
+    pointer-events: none;
+    z-index: 9999;
   }
 }
 
 @layer components {
-  /* Utility classes */
+  /* Typography utilities */
+  .font-serif {
+    font-family: var(--font-fraunces), Georgia, serif;
+  }
+
+  .font-mono {
+    font-family: var(--font-geist-mono), 'SF Mono', monospace;
+  }
+
+  /* Gradient text - warm version */
   .text-gradient {
-    background: linear-gradient(135deg, var(--accent), var(--accent-light));
+    background: linear-gradient(135deg, var(--color-terracotta), var(--color-terracotta-light));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  .font-serif {
-    font-family: var(--font-fraunces), Georgia, serif;
+  /* Ink underline effect */
+  .ink-underline {
+    position: relative;
+    display: inline-block;
+  }
+
+  .ink-underline::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--color-terracotta);
+    border-radius: 2px;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .ink-underline:hover::after {
+    transform: scaleX(1);
+  }
+
+  /* Paper card effect */
+  .paper-card {
+    background: white;
+    border: 1px solid var(--color-paper-darker);
+    border-radius: 12px;
+    box-shadow: var(--shadow-soft);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .paper-card:hover {
+    box-shadow: var(--shadow-medium);
+    transform: translateY(-2px);
   }
 
   /* Word hover for articles */
@@ -68,43 +132,112 @@
   }
 
   .word-span:hover {
-    background-color: rgba(99, 102, 241, 0.15);
-    color: var(--accent-light);
+    background-color: rgba(196, 92, 62, 0.12);
+    color: var(--color-terracotta-dark);
   }
 
   /* Tooltip */
   .tooltip-content {
-    background: var(--background-secondary);
-    border: 1px solid var(--border);
+    background: white;
+    border: 1px solid var(--color-paper-darker);
     border-radius: 12px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-lifted);
+  }
+
+  /* Decorative rule */
+  .decorative-rule {
+    height: 4px;
+    width: 60px;
+    background: var(--color-terracotta);
+    border-radius: 2px;
+  }
+
+  /* Stamp/badge effect */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    background: var(--color-paper-dark);
+    border: 1px solid var(--color-paper-darker);
+    border-radius: 100px;
+    font-size: 0.875rem;
+    color: var(--color-ink-light);
+    font-weight: 500;
   }
 
   /* Animations */
   .animate-fade-in {
-    animation: fadeIn 0.5s ease-out forwards;
+    animation: fadeIn 0.6s ease-out forwards;
   }
+
+  .animate-fade-up {
+    animation: fadeUp 0.6s ease-out forwards;
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.5s ease-out forwards;
+  }
+
+  .stagger-1 { animation-delay: 0.1s; }
+  .stagger-2 { animation-delay: 0.2s; }
+  .stagger-3 { animation-delay: 0.3s; }
+  .stagger-4 { animation-delay: 0.4s; }
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-/* Custom scrollbar - outside layers so it applies globally */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Selection color */
+::selection {
+  background: rgba(196, 92, 62, 0.2);
+  color: var(--color-ink);
+}
+
+/* Custom scrollbar - warm themed */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: var(--color-paper);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  background: var(--color-paper-darker);
+  border-radius: 5px;
+  border: 2px solid var(--color-paper);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--color-ink-faded);
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--color-terracotta);
+  outline-offset: 2px;
 }

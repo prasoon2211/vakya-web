@@ -88,7 +88,7 @@ export function AudioPlayer({ audioUrl, onClose }: AudioPlayerProps) {
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="bg-[#12161d] border-t md:border border-white/10 md:rounded-2xl backdrop-blur-xl">
+    <div className="bg-white border-t md:border border-[#e8dfd3] md:rounded-2xl backdrop-blur-xl shadow-lg">
       <audio ref={audioRef} src={audioUrl} preload="metadata" />
 
       {/* Main controls */}
@@ -96,7 +96,7 @@ export function AudioPlayer({ audioUrl, onClose }: AudioPlayerProps) {
         {/* Skip back */}
         <button
           onClick={() => seek(-10)}
-          className="p-2 text-gray-500 hover:text-white transition-colors"
+          className="p-2 text-[#6b6b6b] hover:text-[#1a1a1a] transition-colors"
           title="Skip back 10 seconds"
         >
           <SkipBack className="h-5 w-5" />
@@ -106,7 +106,7 @@ export function AudioPlayer({ audioUrl, onClose }: AudioPlayerProps) {
         <Button
           onClick={togglePlay}
           size="icon"
-          className="h-12 w-12 rounded-full shadow-lg shadow-amber-500/20"
+          className="h-12 w-12 rounded-full shadow-lg shadow-[#c45c3e]/20"
         >
           {isPlaying ? (
             <Pause className="h-5 w-5" />
@@ -118,7 +118,7 @@ export function AudioPlayer({ audioUrl, onClose }: AudioPlayerProps) {
         {/* Skip forward */}
         <button
           onClick={() => seek(10)}
-          className="p-2 text-gray-500 hover:text-white transition-colors"
+          className="p-2 text-[#6b6b6b] hover:text-[#1a1a1a] transition-colors"
           title="Skip forward 10 seconds"
         >
           <SkipForward className="h-5 w-5" />
@@ -126,12 +126,12 @@ export function AudioPlayer({ audioUrl, onClose }: AudioPlayerProps) {
 
         {/* Progress bar */}
         <div className="flex-1 flex items-center gap-3">
-          <span className="text-xs text-gray-500 w-10 font-mono">
+          <span className="text-xs text-[#6b6b6b] w-10 font-mono">
             {formatTime(currentTime)}
           </span>
-          <div className="flex-1 relative h-1.5 bg-white/10 rounded-full overflow-hidden">
+          <div className="flex-1 relative h-1.5 bg-[#e8dfd3] rounded-full overflow-hidden">
             <div
-              className="absolute inset-y-0 left-0 bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-150"
+              className="absolute inset-y-0 left-0 bg-gradient-to-r from-[#c45c3e] to-[#d4724f] rounded-full transition-all duration-150"
               style={{ width: `${progress}%` }}
             />
             <input
@@ -143,7 +143,7 @@ export function AudioPlayer({ audioUrl, onClose }: AudioPlayerProps) {
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             />
           </div>
-          <span className="text-xs text-gray-500 w-10 font-mono">
+          <span className="text-xs text-[#6b6b6b] w-10 font-mono">
             {formatTime(duration)}
           </span>
         </div>
@@ -154,8 +154,8 @@ export function AudioPlayer({ audioUrl, onClose }: AudioPlayerProps) {
           className={cn(
             "px-2.5 py-1 text-xs font-medium rounded-lg border transition-all duration-200",
             playbackSpeed !== 1
-              ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
-              : "bg-white/5 border-white/10 text-gray-400 hover:border-white/20"
+              ? "bg-[#c45c3e]/10 border-[#c45c3e]/30 text-[#c45c3e]"
+              : "bg-[#f3ede4] border-[#e8dfd3] text-[#6b6b6b] hover:border-[#d4c5b5]"
           )}
         >
           {playbackSpeed}x
@@ -165,7 +165,7 @@ export function AudioPlayer({ audioUrl, onClose }: AudioPlayerProps) {
         {onClose && (
           <button
             onClick={onClose}
-            className="p-2 text-gray-500 hover:text-white transition-colors"
+            className="p-2 text-[#6b6b6b] hover:text-[#1a1a1a] transition-colors"
           >
             <X className="h-5 w-5" />
           </button>

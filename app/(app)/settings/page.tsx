@@ -145,15 +145,17 @@ export default function SettingsPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+        <Loader2 className="h-8 w-8 animate-spin text-[#c45c3e]" />
       </div>
     );
   }
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <h1 className="text-2xl font-bold text-white mb-8 flex items-center gap-2">
-        <Settings className="h-6 w-6 text-amber-400" />
+      <h1 className="font-serif text-2xl font-bold text-[#1a1a1a] mb-8 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-[#c45c3e]/10 flex items-center justify-center">
+          <Settings className="h-5 w-5 text-[#c45c3e]" />
+        </div>
         Settings
       </h1>
 
@@ -173,12 +175,12 @@ export default function SettingsPage() {
                     alt="Profile"
                     width={64}
                     height={64}
-                    className="h-16 w-16 rounded-full"
+                    className="h-16 w-16 rounded-full ring-2 ring-[#e8dfd3]"
                   />
                 )}
                 <div>
-                  <p className="font-medium text-white">{user.fullName || "User"}</p>
-                  <p className="text-sm text-gray-500">
+                  <p className="font-medium text-[#1a1a1a]">{user.fullName || "User"}</p>
+                  <p className="text-sm text-[#6b6b6b]">
                     {user.primaryEmailAddress?.emailAddress}
                   </p>
                 </div>
@@ -191,7 +193,7 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Globe className="h-5 w-5 text-amber-400" />
+              <Globe className="h-5 w-5 text-[#c45c3e]" />
               Language Preferences
             </CardTitle>
             <CardDescription>
@@ -200,7 +202,7 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
+              <label className="block text-sm font-medium text-[#6b6b6b] mb-2">
                 Native Language
               </label>
               <Select value={nativeLanguage} onValueChange={setNativeLanguage}>
@@ -219,7 +221,7 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
+              <label className="block text-sm font-medium text-[#6b6b6b] mb-2">
                 Target Language
               </label>
               <Select value={targetLanguage} onValueChange={setTargetLanguage}>
@@ -242,7 +244,7 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <BookOpen className="h-5 w-5 text-amber-400" />
+              <BookOpen className="h-5 w-5 text-[#c45c3e]" />
               Proficiency Level
             </CardTitle>
             <CardDescription>
@@ -258,25 +260,25 @@ export default function SettingsPage() {
                   className={cn(
                     "flex items-start gap-4 p-4 rounded-xl border text-left transition-all",
                     cefrLevel === level.value
-                      ? "border-amber-500 bg-amber-500/10"
-                      : "border-white/10 hover:border-white/20 hover:bg-white/5"
+                      ? "border-[#c45c3e] bg-[#c45c3e]/5"
+                      : "border-[#e8dfd3] hover:border-[#d4c5b5] hover:bg-[#faf7f2]"
                   )}
                 >
                   <div
                     className={cn(
                       "h-5 w-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5",
                       cefrLevel === level.value
-                        ? "border-amber-500"
-                        : "border-white/20"
+                        ? "border-[#c45c3e]"
+                        : "border-[#d4c5b5]"
                     )}
                   >
                     {cefrLevel === level.value && (
-                      <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+                      <div className="h-2.5 w-2.5 rounded-full bg-[#c45c3e]" />
                     )}
                   </div>
                   <div>
-                    <p className="font-medium text-white">{level.label}</p>
-                    <p className="text-sm text-gray-500">
+                    <p className="font-medium text-[#1a1a1a]">{level.label}</p>
+                    <p className="text-sm text-[#6b6b6b]">
                       {level.description}
                     </p>
                   </div>

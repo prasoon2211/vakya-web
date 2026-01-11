@@ -19,14 +19,14 @@ export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 bg-[#0c0f14]/90 backdrop-blur-md border-b border-white/10">
+    <header className="sticky top-0 z-50 bg-[#faf7f2]/90 backdrop-blur-md border-b border-[#e8dfd3]">
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+        <Link href="/" className="flex items-center gap-3 group">
+          <div className="w-10 h-10 rounded-xl bg-[#c45c3e] flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow">
             <span className="font-serif text-xl font-bold text-white">V</span>
           </div>
-          <span className="text-xl font-semibold text-white">Vakya</span>
+          <span className="text-xl font-semibold text-[#1a1a1a]">Vakya</span>
         </Link>
 
         {/* Desktop Navigation */}
@@ -42,8 +42,8 @@ export function Header() {
                   className={cn(
                     "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200",
                     isActive
-                      ? "text-amber-400 bg-amber-500/10"
-                      : "text-gray-400 hover:text-white hover:bg-white/5"
+                      ? "text-[#c45c3e] bg-[#c45c3e]/10"
+                      : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -70,14 +70,14 @@ export function Header() {
               afterSignOutUrl="/"
               appearance={{
                 elements: {
-                  avatarBox: "h-9 w-9",
+                  avatarBox: "h-9 w-9 ring-2 ring-[#e8dfd3] ring-offset-2 ring-offset-[#faf7f2]",
                 },
               }}
             />
 
             {/* Mobile Menu Button */}
             <button
-              className="md:hidden p-2 text-gray-400 hover:text-white transition-colors"
+              className="md:hidden p-2 text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4] rounded-lg transition-colors"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
               {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
@@ -89,7 +89,7 @@ export function Header() {
       {/* Mobile Navigation */}
       <SignedIn>
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-white/10 bg-[#0c0f14]">
+          <div className="md:hidden border-t border-[#e8dfd3] bg-[#faf7f2]">
             <nav className="flex flex-col p-4 space-y-1">
               {navItems.map((item) => {
                 const Icon = item.icon;
@@ -102,8 +102,8 @@ export function Header() {
                     className={cn(
                       "flex items-center gap-3 px-4 py-3 text-base font-medium rounded-xl transition-colors",
                       isActive
-                        ? "text-amber-400 bg-amber-500/10"
-                        : "text-gray-400 hover:text-white hover:bg-white/5"
+                        ? "text-[#c45c3e] bg-[#c45c3e]/10"
+                        : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
                     )}
                   >
                     <Icon className="h-5 w-5" />

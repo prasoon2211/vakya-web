@@ -28,10 +28,15 @@ export const articles = pgTable(
       .notNull(),
     sourceUrl: text("source_url").notNull(),
     title: text("title"),
-    originalContent: text("original_content").notNull(),
-    translatedContent: text("translated_content").notNull(),
+    originalContent: text("original_content"),
+    translatedContent: text("translated_content"),
     targetLanguage: text("target_language").notNull(),
     cefrLevel: text("cefr_level").notNull(),
+    // Translation status tracking
+    status: text("status").default("pending").notNull(), // pending, fetching, translating, completed, failed
+    translationProgress: integer("translation_progress").default(0).notNull(), // paragraphs translated
+    totalParagraphs: integer("total_paragraphs").default(0).notNull(),
+    errorMessage: text("error_message"),
     audioUrl: text("audio_url"),
     audioDurationSeconds: integer("audio_duration_seconds"),
     wordCount: integer("word_count"),
@@ -82,6 +87,26 @@ export const savedWords = pgTable(
   ]
 );
 
+// Cache for AI word translations (reusable across users)
+export const wordCache = pgTable(
+  "word_cache",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    word: text("word").notNull(),
+    targetLanguage: text("target_language").notNull(),
+    cefrLevel: text("cefr_level").notNull(),
+    translation: text("translation"),
+    partOfSpeech: text("part_of_speech"),
+    article: text("article"), // for German der/die/das
+    example: text("example"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("word_cache_unique").on(table.word, table.targetLanguage, table.cefrLevel),
+    index("idx_word_cache_lookup").on(table.word, table.targetLanguage),
+  ]
+);
+
 // Type exports for use in application
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -89,6 +114,8 @@ export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
 export type SavedWord = typeof savedWords.$inferSelect;
 export type NewSavedWord = typeof savedWords.$inferInsert;
+export type WordCache = typeof wordCache.$inferSelect;
+export type NewWordCache = typeof wordCache.$inferInsert;
 
 export type CEFRLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 

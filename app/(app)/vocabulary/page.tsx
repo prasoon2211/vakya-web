@@ -170,7 +170,7 @@ export default function VocabularyPage() {
             <X className="h-4 w-4 mr-2" />
             Exit Review
           </Button>
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-[#6b6b6b]">
             {currentReviewIndex + 1} / {reviewWords.length}
           </span>
         </div>
@@ -181,13 +181,13 @@ export default function VocabularyPage() {
             {mastery.label}
           </Badge>
 
-          <h2 className="text-3xl font-bold text-white mb-2">{currentWord.word}</h2>
+          <h2 className="font-serif text-3xl font-bold text-[#1a1a1a] mb-2">{currentWord.word}</h2>
           {currentWord.article && (
-            <p className="text-lg text-amber-400 mb-4">{currentWord.article}</p>
+            <p className="text-lg text-[#c45c3e] mb-4">{currentWord.article}</p>
           )}
 
           {currentWord.contextSentence && (
-            <p className="text-sm text-gray-500 italic mb-6">
+            <p className="text-sm text-[#6b6b6b] italic mb-6">
               &ldquo;{currentWord.contextSentence}&rdquo;
             </p>
           )}
@@ -197,20 +197,20 @@ export default function VocabularyPage() {
               Show Answer
             </Button>
           ) : (
-            <div className="space-y-6 mt-6 pt-6 border-t border-white/10">
+            <div className="space-y-6 mt-6 pt-6 border-t border-[#e8dfd3]">
               <div>
-                <p className="text-sm text-gray-500 uppercase tracking-wide mb-1">
+                <p className="text-sm text-[#9a9a9a] uppercase tracking-wide mb-1">
                   Translation
                 </p>
-                <p className="text-xl font-semibold text-white">{currentWord.translation || "No translation"}</p>
+                <p className="text-xl font-semibold text-[#1a1a1a]">{currentWord.translation || "No translation"}</p>
               </div>
 
               {currentWord.example && (
                 <div>
-                  <p className="text-sm text-gray-500 uppercase tracking-wide mb-1">
+                  <p className="text-sm text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Example
                   </p>
-                  <p className="text-gray-400 italic">
+                  <p className="text-[#6b6b6b] italic">
                     {currentWord.example}
                   </p>
                 </div>
@@ -260,11 +260,16 @@ export default function VocabularyPage() {
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Vocabulary</h1>
-          <p className="text-gray-500">
-            {words.length} word{words.length !== 1 ? "s" : ""} saved
-          </p>
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-[#2d5a47]/10 flex items-center justify-center">
+            <BookOpen className="h-5 w-5 text-[#2d5a47]" />
+          </div>
+          <div>
+            <h1 className="font-serif text-2xl font-bold text-[#1a1a1a]">Vocabulary</h1>
+            <p className="text-[#6b6b6b]">
+              {words.length} word{words.length !== 1 ? "s" : ""} saved
+            </p>
+          </div>
         </div>
         <Button onClick={startReview}>
           <RotateCcw className="h-4 w-4 mr-2" />
@@ -275,7 +280,7 @@ export default function VocabularyPage() {
       {/* Search & Filter */}
       <div className="mb-6 space-y-4">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#9a9a9a]" />
           <Input
             placeholder="Search words..."
             value={search}
@@ -305,12 +310,12 @@ export default function VocabularyPage() {
       {/* Word List */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+          <Loader2 className="h-8 w-8 animate-spin text-[#c45c3e]" />
         </div>
       ) : words.length === 0 ? (
-        <Card className="p-8 text-center">
-          <BookOpen className="h-12 w-12 mx-auto text-gray-500 opacity-50 mb-4" />
-          <p className="text-gray-500">
+        <Card className="p-8 text-center border-dashed border-2 bg-[#faf7f2]">
+          <BookOpen className="h-12 w-12 mx-auto text-[#9a9a9a] opacity-50 mb-4" />
+          <p className="text-[#6b6b6b]">
             {search
               ? "No words found matching your search"
               : filter === "review"
@@ -334,25 +339,25 @@ export default function VocabularyPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       {word.article && (
-                        <span className="text-amber-400 text-sm font-medium">
+                        <span className="text-[#c45c3e] text-sm font-medium">
                           {word.article}
                         </span>
                       )}
-                      <span className="font-semibold text-white truncate">{word.word}</span>
+                      <span className="font-semibold text-[#1a1a1a] truncate">{word.word}</span>
                       {word.partOfSpeech && (
                         <Badge variant="outline" className="text-xs">
                           {word.partOfSpeech}
                         </Badge>
                       )}
                     </div>
-                    <p className="text-sm text-gray-500 truncate">
+                    <p className="text-sm text-[#6b6b6b] truncate">
                       {word.translation || "No translation"}
                     </p>
                   </div>
 
                   <div className="flex items-center gap-3">
                     <Badge variant={mastery.variant}>{mastery.label}</Badge>
-                    <ChevronRight className="h-4 w-4 text-gray-500" />
+                    <ChevronRight className="h-4 w-4 text-[#9a9a9a]" />
                   </div>
                 </div>
               </Card>
@@ -368,7 +373,7 @@ export default function VocabularyPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {selectedWord.article && (
-                  <span className="text-amber-400">{selectedWord.article}</span>
+                  <span className="text-[#c45c3e]">{selectedWord.article}</span>
                 )}
                 {selectedWord.word}
               </DialogTitle>
@@ -380,28 +385,28 @@ export default function VocabularyPage() {
             <div className="space-y-4 py-4">
               {selectedWord.translation && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Translation
                   </p>
-                  <p className="text-white">{selectedWord.translation}</p>
+                  <p className="text-[#1a1a1a]">{selectedWord.translation}</p>
                 </div>
               )}
 
               {selectedWord.example && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Example
                   </p>
-                  <p className="text-gray-400 italic">{selectedWord.example}</p>
+                  <p className="text-[#6b6b6b] italic">{selectedWord.example}</p>
                 </div>
               )}
 
               {selectedWord.contextSentence && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Context
                   </p>
-                  <p className="text-gray-400 italic">
+                  <p className="text-[#6b6b6b] italic">
                     &ldquo;{selectedWord.contextSentence}&rdquo;
                   </p>
                 </div>
@@ -409,10 +414,10 @@ export default function VocabularyPage() {
 
               {selectedWord.notes && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Notes
                   </p>
-                  <p className="text-gray-500">{selectedWord.notes}</p>
+                  <p className="text-[#6b6b6b]">{selectedWord.notes}</p>
                 </div>
               )}
 
@@ -420,7 +425,7 @@ export default function VocabularyPage() {
                 <Badge variant={getMasteryBadge(selectedWord.masteryLevel).variant}>
                   {getMasteryBadge(selectedWord.masteryLevel).label}
                 </Badge>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-[#9a9a9a]">
                   Level {selectedWord.masteryLevel}/5
                 </span>
               </div>

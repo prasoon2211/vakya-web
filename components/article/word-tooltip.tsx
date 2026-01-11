@@ -16,9 +16,12 @@ interface WordTooltipProps {
 interface DictionaryResult {
   found: boolean;
   word: string;
+  translation?: string;
+  partOfSpeech?: string;
+  article?: string;
+  gender?: string;
   phonetic?: string;
   audioUrl?: string;
-  partOfSpeech?: string;
   definition?: string;
   example?: string;
   synonyms?: string[];
@@ -105,13 +108,13 @@ export function WordTooltip({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           word,
-          context_sentence: contextSentence,
-          translation: aiAnalysis?.translation || dictionaryResult?.definition,
-          part_of_speech: aiAnalysis?.pos || dictionaryResult?.partOfSpeech,
-          article: aiAnalysis?.article,
+          contextSentence,
+          translation: aiAnalysis?.translation || dictionaryResult?.translation || dictionaryResult?.definition,
+          partOfSpeech: aiAnalysis?.pos || dictionaryResult?.partOfSpeech,
+          article: aiAnalysis?.article || dictionaryResult?.article,
           example: aiAnalysis?.example || dictionaryResult?.example,
-          target_language: targetLanguage,
-          source_article_id: articleId,
+          targetLanguage,
+          sourceArticleId: articleId,
         }),
       });
 
@@ -153,21 +156,21 @@ export function WordTooltip({
   };
 
   return (
-    <div className="w-full max-w-sm">
+    <div className="w-full max-w-sm min-h-[180px]">
       {/* Word header */}
       <div className="flex items-start justify-between gap-2 mb-3">
         <div>
           <h3 className="text-xl font-semibold text-white">{word}</h3>
           {dictionaryResult?.phonetic && (
-            <p className="text-sm text-gray-500">{dictionaryResult.phonetic}</p>
+            <p className="text-sm text-white/60">{dictionaryResult.phonetic}</p>
           )}
         </div>
         {dictionaryResult?.audioUrl && (
           <button
             onClick={playAudio}
-            className="p-2 rounded-lg hover:bg-white/5 transition-colors"
+            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
           >
-            <Volume2 className="h-4 w-4 text-gray-500" />
+            <Volume2 className="h-4 w-4 text-white/60" />
           </button>
         )}
       </div>
@@ -175,8 +178,8 @@ export function WordTooltip({
       {/* Loading state */}
       {isLoadingDict && (
         <div className="flex items-center gap-2 py-4">
-          <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-          <span className="text-sm text-gray-500">Looking up...</span>
+          <Loader2 className="h-4 w-4 animate-spin text-white/60" />
+          <span className="text-sm text-white/60">Looking up...</span>
         </div>
       )}
 
@@ -185,22 +188,41 @@ export function WordTooltip({
         <div className="space-y-3">
           {dictionaryResult.found ? (
             <>
-              {dictionaryResult.partOfSpeech && (
-                <Badge variant="secondary">{dictionaryResult.partOfSpeech}</Badge>
+              {/* Badges for article, POS, gender */}
+              <div className="flex flex-wrap gap-2">
+                {dictionaryResult.article && (
+                  <Badge variant="default">{dictionaryResult.article}</Badge>
+                )}
+                {dictionaryResult.partOfSpeech && (
+                  <Badge variant="secondary">{dictionaryResult.partOfSpeech}</Badge>
+                )}
+                {dictionaryResult.gender && (
+                  <Badge variant="outline">{dictionaryResult.gender}</Badge>
+                )}
+              </div>
+              {/* Translation from local dictionary */}
+              {dictionaryResult.translation && (
+                <div>
+                  <p className="text-xs text-white/50 uppercase tracking-wide mb-1">
+                    Translation
+                  </p>
+                  <p className="text-white font-medium text-lg">{dictionaryResult.translation}</p>
+                </div>
               )}
-              {dictionaryResult.definition && (
-                <p className="text-sm text-gray-400">
+              {/* Fallback to definition if no translation */}
+              {!dictionaryResult.translation && dictionaryResult.definition && (
+                <p className="text-sm text-white/80">
                   {dictionaryResult.definition}
                 </p>
               )}
               {dictionaryResult.example && (
-                <p className="text-sm text-gray-500 italic">
+                <p className="text-sm text-white/60 italic">
                   &ldquo;{dictionaryResult.example}&rdquo;
                 </p>
               )}
             </>
           ) : (
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-white/60">
               {dictionaryResult.message || "No dictionary entry found"}
             </p>
           )}
@@ -219,7 +241,7 @@ export function WordTooltip({
             ) : (
               <>
                 <Sparkles className="h-4 w-4 mr-2" />
-                Analyze with AI
+                {dictionaryResult.found ? "Get more details" : "Analyze with AI"}
               </>
             )}
           </Button>
@@ -244,19 +266,19 @@ export function WordTooltip({
 
           {/* Translation */}
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+            <p className="text-xs text-white/50 uppercase tracking-wide mb-1">
               Translation
             </p>
-            <p className="text-white">{aiAnalysis.translation}</p>
+            <p className="text-white font-medium text-lg">{aiAnalysis.translation}</p>
           </div>
 
           {/* Example */}
           {aiAnalysis.example && (
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+              <p className="text-xs text-white/50 uppercase tracking-wide mb-1">
                 Example
               </p>
-              <p className="text-sm text-gray-400 italic">
+              <p className="text-sm text-white/70 italic">
                 {aiAnalysis.example}
               </p>
             </div>
@@ -265,10 +287,10 @@ export function WordTooltip({
           {/* Explanation */}
           {aiAnalysis.explanation && (
             <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+              <p className="text-xs text-white/50 uppercase tracking-wide mb-1">
                 Notes
               </p>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-white/70">
                 {aiAnalysis.explanation}
               </p>
             </div>

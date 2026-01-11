@@ -30,7 +30,7 @@ function WordSpan({ word, display, sentence, targetLanguage, articleId }: WordSp
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         <span
-          className="cursor-pointer rounded-sm px-0.5 -mx-0.5 transition-colors duration-150 hover:bg-amber-500/20 hover:text-amber-300"
+          className="cursor-pointer rounded-sm px-0.5 -mx-0.5 transition-colors duration-150 hover:bg-[#c45c3e]/20 hover:text-[#c45c3e]"
           onClick={() => setIsOpen(true)}
         >
           {display}
@@ -53,7 +53,65 @@ function WordSpan({ word, display, sentence, targetLanguage, articleId }: WordSp
   );
 }
 
-function Paragraph({
+// Render a single paragraph with clickable words
+function ParagraphText({
+  text,
+  targetLanguage,
+  articleId,
+}: {
+  text: string;
+  targetLanguage: string;
+  articleId: string;
+}) {
+  // Split text into words while preserving whitespace
+  const words = text.split(/(\s+)/);
+
+  return (
+    <p className="text-lg leading-relaxed text-[#1a1a1a] mb-6">
+      {words.map((segment, i) => {
+        // Check if it's whitespace
+        if (/^\s+$/.test(segment)) {
+          return <span key={i}>{segment}</span>;
+        }
+
+        // Extract the clean word (letters only)
+        const cleanWord = segment.replace(/[^\p{L}\p{M}'-]/gu, "");
+        if (!cleanWord) {
+          return <span key={i}>{segment}</span>;
+        }
+
+        return (
+          <WordSpan
+            key={i}
+            word={cleanWord}
+            display={segment}
+            sentence={text}
+            targetLanguage={targetLanguage}
+            articleId={articleId}
+          />
+        );
+      })}
+    </p>
+  );
+}
+
+// Render original text with paragraph breaks
+function OriginalText({ text }: { text: string }) {
+  const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
+
+  return (
+    <>
+      {paragraphs.map((paragraph, i) => (
+        <p key={i} className="text-lg leading-relaxed text-[#6b6b6b] italic mb-6">
+          {paragraph}
+        </p>
+      ))}
+    </>
+  );
+}
+
+// A chunk may contain multiple paragraphs separated by \n\n
+function TranslationChunk({
   block,
   targetLanguage,
   articleId,
@@ -83,18 +141,6 @@ function Paragraph({
     }
   }, []);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Meta" || e.key === "Control") {
-      setShowOriginal(true);
-    }
-  }, []);
-
-  const handleKeyUp = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Meta" || e.key === "Control") {
-      setShowOriginal(false);
-    }
-  }, []);
-
   // Handle global keydown/keyup for Cmd/Ctrl
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -118,8 +164,8 @@ function Paragraph({
     };
   }, []);
 
-  // Split translated text into words
-  const words = block.translated.split(/(\s+)/);
+  // Split translated text into paragraphs (chunks may have internal \n\n breaks)
+  const translatedParagraphs = block.translated.split(/\n\n+/).filter(p => p.trim());
 
   return (
     <div
@@ -129,45 +175,24 @@ function Paragraph({
       onMouseLeave={handleMouseUp}
       onTouchStart={handleMouseDown}
       onTouchEnd={handleMouseUp}
-      onKeyDown={handleKeyDown}
-      onKeyUp={handleKeyUp}
       tabIndex={0}
     >
-      <p className="text-lg leading-relaxed text-white mb-6">
-        {showOriginal ? (
-          <span className="text-gray-400 italic">
-            {block.original}
-          </span>
-        ) : (
-          words.map((segment, i) => {
-            // Check if it's whitespace
-            if (/^\s+$/.test(segment)) {
-              return <span key={i}>{segment}</span>;
-            }
+      {showOriginal ? (
+        <OriginalText text={block.original} />
+      ) : (
+        translatedParagraphs.map((paragraph, i) => (
+          <ParagraphText
+            key={i}
+            text={paragraph}
+            targetLanguage={targetLanguage}
+            articleId={articleId}
+          />
+        ))
+      )}
 
-            // Extract the clean word (letters only)
-            const cleanWord = segment.replace(/[^\p{L}\p{M}'-]/gu, "");
-            if (!cleanWord) {
-              return <span key={i}>{segment}</span>;
-            }
-
-            return (
-              <WordSpan
-                key={i}
-                word={cleanWord}
-                display={segment}
-                sentence={block.translated}
-                targetLanguage={targetLanguage}
-                articleId={articleId}
-              />
-            );
-          })
-        )}
-      </p>
-
-      {/* Hold hint */}
+      {/* Hold hint - only show on first chunk paragraph */}
       <div className="absolute -left-8 top-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none hidden md:block">
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-[#9a9a9a]">
           {showOriginal ? "Original" : "Hold Cmd"}
         </span>
       </div>
@@ -179,7 +204,7 @@ export function TranslatedText({ blocks, targetLanguage, articleId }: Translated
   return (
     <div className="max-w-none">
       {blocks.map((block, index) => (
-        <Paragraph
+        <TranslationChunk
           key={index}
           block={block}
           targetLanguage={targetLanguage}

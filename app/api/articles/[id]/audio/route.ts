@@ -121,6 +121,12 @@ export async function POST(
 
     // Parse translated content
     let blocks: TranslationBlock[] = [];
+    if (!article.translatedContent) {
+      return NextResponse.json(
+        { error: "Article translation not complete" },
+        { status: 400 }
+      );
+    }
     try {
       blocks = JSON.parse(article.translatedContent);
     } catch {
@@ -136,12 +142,13 @@ export async function POST(
       .join("\n\n")
       .slice(0, 4096); // OpenAI TTS limit
 
-    // Generate audio with OpenAI TTS
+    // Generate audio with OpenAI TTS (gpt-4o-mini-tts with German instructions)
     const mp3 = await openai.audio.speech.create({
-      model: "tts-1",
-      voice: "alloy",
+      model: "gpt-4o-mini-tts",
+      voice: "coral",
       input: translatedText,
-      speed: 1.0,
+      instructions: "Speak in German with clear, native German pronunciation. Use a calm, measured pace suitable for language learners. Enunciate clearly and naturally.",
+      speed: 0.9, // Slightly slower for language learning
     });
 
     // Convert to buffer

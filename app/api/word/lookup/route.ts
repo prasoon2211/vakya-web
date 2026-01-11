@@ -1,22 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { lookupWord, type DictionaryEntry } from "@/lib/dictionary/lookup";
 
-// Language codes for Free Dictionary API
-const LANGUAGE_CODES: Record<string, string> = {
-  English: "en",
-  German: "de",
-  Spanish: "es",
-  French: "fr",
-  Italian: "it",
-  Portuguese: "pt",
-  Dutch: "nl",
-  Russian: "ru",
-  Arabic: "ar",
-  Turkish: "tr",
-  Hindi: "hi",
-};
-
-// GET - Dictionary lookup
+// GET - Dictionary lookup (German-English only, uses local dictionary)
 export async function GET(request: Request) {
   try {
     const { userId } = await auth();
@@ -26,20 +12,25 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const word = searchParams.get("word");
-    const language = searchParams.get("language") || "English";
+    const language = searchParams.get("language") || "German";
 
     if (!word) {
       return NextResponse.json({ error: "Word is required" }, { status: 400 });
     }
 
-    const langCode = LANGUAGE_CODES[language] || "en";
+    // Only German is supported for now
+    if (language !== "German") {
+      return NextResponse.json({
+        found: false,
+        word,
+        message: "Only German is supported at this time",
+      });
+    }
 
-    // Try Free Dictionary API
-    const response = await fetch(
-      `https://api.dictionaryapi.dev/api/v2/entries/${langCode}/${encodeURIComponent(word.toLowerCase())}`
-    );
+    // Use local TU Chemnitz dictionary for instant lookup
+    const entry: DictionaryEntry | null = lookupWord(word);
 
-    if (!response.ok) {
+    if (!entry) {
       return NextResponse.json({
         found: false,
         word,
@@ -47,30 +38,16 @@ export async function GET(request: Request) {
       });
     }
 
-    const data = await response.json();
-
-    if (!Array.isArray(data) || data.length === 0) {
-      return NextResponse.json({
-        found: false,
-        word,
-        message: "No definitions found",
-      });
-    }
-
-    const entry = data[0];
-    const meanings = entry.meanings || [];
-    const firstMeaning = meanings[0] || {};
-    const firstDefinition = firstMeaning.definitions?.[0] || {};
-
     return NextResponse.json({
       found: true,
-      word: entry.word,
-      phonetic: entry.phonetic || entry.phonetics?.[0]?.text || null,
-      audioUrl: entry.phonetics?.find((p: { audio?: string }) => p.audio)?.audio || null,
-      partOfSpeech: firstMeaning.partOfSpeech || null,
-      definition: firstDefinition.definition || null,
-      example: firstDefinition.example || null,
-      synonyms: firstMeaning.synonyms?.slice(0, 5) || [],
+      word: entry.de,
+      translation: entry.en,
+      partOfSpeech: entry.pos || null,
+      article: entry.article || null,
+      gender: entry.gender || null,
+      // No phonetic/audio from this dictionary
+      phonetic: null,
+      audioUrl: null,
     });
   } catch (error) {
     console.error("Dictionary lookup error:", error);

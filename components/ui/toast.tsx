@@ -29,9 +29,9 @@ const Toast = React.forwardRef<
   }
 >(({ className, variant = "default", ...props }, ref) => {
   const variants = {
-    default: "border-white/10 bg-[#12161d]",
-    success: "border-emerald-500/30 bg-[#12161d]",
-    error: "border-red-500/30 bg-[#12161d]",
+    default: "border-[#e8dfd3] bg-white",
+    success: "border-emerald-200 bg-white",
+    error: "border-red-200 bg-white",
   };
 
   return (
@@ -56,7 +56,7 @@ const ToastAction = React.forwardRef<
   <ToastPrimitives.Action
     ref={ref}
     className={cn(
-      "inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-transparent px-3 text-sm font-medium transition-colors hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:pointer-events-none disabled:opacity-50",
+      "inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-[#e8dfd3] bg-transparent px-3 text-sm font-medium text-[#3d3d3d] transition-colors hover:bg-[#f3ede4] focus:outline-none focus:ring-2 focus:ring-[#c45c3e] disabled:pointer-events-none disabled:opacity-50",
       className
     )}
     {...props}
@@ -71,7 +71,7 @@ const ToastClose = React.forwardRef<
   <ToastPrimitives.Close
     ref={ref}
     className={cn(
-      "absolute right-2 top-2 rounded-md p-1 text-gray-500 transition-colors hover:text-white focus:outline-none focus:ring-2 focus:ring-amber-500",
+      "absolute right-2 top-2 rounded-md p-1 text-[#9a9a9a] transition-colors hover:text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[#c45c3e]",
       className
     )}
     toast-close=""
@@ -88,7 +88,7 @@ const ToastTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitives.Title
     ref={ref}
-    className={cn("text-sm font-semibold text-white", className)}
+    className={cn("text-sm font-semibold text-[#1a1a1a]", className)}
     {...props}
   />
 ));
@@ -100,7 +100,7 @@ const ToastDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitives.Description
     ref={ref}
-    className={cn("text-sm text-gray-500", className)}
+    className={cn("text-sm text-[#6b6b6b]", className)}
     {...props}
   />
 ));

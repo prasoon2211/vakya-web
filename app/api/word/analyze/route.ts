@@ -1,14 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import { db, users } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { db, users, wordCache } from "@/lib/db";
+import { eq, and } from "drizzle-orm";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// POST - AI word analysis
+// POST - AI word analysis with caching
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get user's native language
+    // Get user's native language and CEFR level
     const user = await db.query.users.findFirst({
       where: eq(users.clerkId, userId),
       columns: { nativeLanguage: true, cefrLevel: true },
@@ -34,7 +34,29 @@ export async function POST(request: Request) {
 
     const nativeLanguage = user?.nativeLanguage || "English";
     const cefrLevel = user?.cefrLevel || "B1";
+    const normalizedWord = word.toLowerCase().trim();
 
+    // Check cache first
+    const cached = await db.query.wordCache.findFirst({
+      where: and(
+        eq(wordCache.word, normalizedWord),
+        eq(wordCache.targetLanguage, targetLanguage),
+        eq(wordCache.cefrLevel, cefrLevel)
+      ),
+    });
+
+    if (cached) {
+      return NextResponse.json({
+        word: normalizedWord,
+        translation: cached.translation,
+        pos: cached.partOfSpeech,
+        article: cached.article,
+        example: cached.example,
+        cached: true,
+      });
+    }
+
+    // Not in cache - call OpenAI
     const prompt = `Analyze the word "${word}" in ${targetLanguage}${contextSentence ? ` appearing in this context: "${contextSentence}"` : ""}.
 The learner speaks ${nativeLanguage} and is learning ${targetLanguage} at ${cefrLevel} level.
 
@@ -49,7 +71,7 @@ Return ONLY a valid JSON object with these exact keys:
 }`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-5-nano",
       messages: [
         {
           role: "system",
@@ -59,8 +81,6 @@ Return ONLY a valid JSON object with these exact keys:
         { role: "user", content: prompt },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.3,
-      max_tokens: 500,
     });
 
     const content = response.choices[0]?.message?.content;
@@ -82,9 +102,26 @@ Return ONLY a valid JSON object with these exact keys:
       );
     }
 
+    // Save to cache (fire and forget - don't block response)
+    db.insert(wordCache)
+      .values({
+        word: normalizedWord,
+        targetLanguage,
+        cefrLevel,
+        translation: analysis.translation,
+        partOfSpeech: analysis.pos,
+        article: analysis.article || null,
+        example: analysis.example,
+      })
+      .onConflictDoNothing()
+      .catch((err) => {
+        console.error("Failed to cache word:", err);
+      });
+
     return NextResponse.json({
-      word,
+      word: normalizedWord,
       ...analysis,
+      cached: false,
     });
   } catch (error) {
     console.error("Word analysis error:", error);
