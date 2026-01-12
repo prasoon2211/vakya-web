@@ -191,9 +191,9 @@ function TranslationChunk({
       )}
 
       {/* Hold hint - only show on first chunk paragraph */}
-      <div className="absolute -left-8 top-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none hidden md:block">
-        <span className="text-xs text-[#9a9a9a]">
-          {showOriginal ? "Original" : "Hold Cmd"}
+      <div className="absolute -top-6 right-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none hidden md:block">
+        <span className="text-xs text-[#9a9a9a] bg-white/80 px-2 py-0.5 rounded">
+          {showOriginal ? "Original" : "Hold ⌘ for original"}
         </span>
       </div>
     </div>
