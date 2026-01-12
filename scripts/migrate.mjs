@@ -17,17 +17,22 @@ if (!connectionString) {
 async function main() {
   console.log("Running migrations...");
 
-  const sql = postgres(connectionString, { max: 1 });
+  // Use { max: 1, idle_timeout: 0 } for quick exit
+  const sql = postgres(connectionString, { max: 1, idle_timeout: 0 });
   const db = drizzle(sql);
 
-  await migrate(db, { migrationsFolder: "./drizzle" });
-
-  console.log("Migrations complete!");
-  await sql.end();
-  process.exit(0);
+  try {
+    await migrate(db, { migrationsFolder: "./drizzle" });
+    console.log("Migrations complete!");
+  } finally {
+    // Force close connection and exit immediately
+    await sql.end({ timeout: 1 });
+  }
 }
 
-main().catch((err) => {
-  console.error("Migration failed:", err);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error("Migration failed:", err);
+    process.exit(1);
+  });
