@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm run dict:build && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
@@ -14,8 +14,7 @@
     "db:studio": "drizzle-kit studio",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "dict:build": "tsx scripts/parse-dictionary.ts",
-    "postinstall": "npm run dict:build || true"
+    "dict:build": "tsx scripts/parse-dictionary.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.964.0",
