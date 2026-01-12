@@ -42,10 +42,10 @@ export async function GET(request: Request) {
       found: true,
       word: entry.word,
       translation: entry.en,
-      partOfSpeech: entry.pos || null,
-      article: entry.article || null,
-      gender: entry.gender || null,
-      // No phonetic/audio from this dictionary
+      // MUSE dictionaries don't include grammar info
+      partOfSpeech: null,
+      article: null,
+      gender: null,
       phonetic: null,
       audioUrl: null,
     });

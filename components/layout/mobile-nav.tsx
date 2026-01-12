@@ -14,6 +14,10 @@ const navItems = [
 export function MobileNav() {
   const pathname = usePathname();
 
+  // Hide on article pages - audio player takes this space
+  const isArticlePage = pathname.startsWith("/article/");
+  if (isArticlePage) return null;
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white/95 backdrop-blur-md border-t border-[#e8dfd3]">
       <div className="flex items-center justify-around h-16">

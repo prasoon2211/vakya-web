@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
 import { WordTooltip } from "./word-tooltip";
+import { useIsMobile } from "@/lib/hooks/use-media-query";
 
 interface TranslationBlock {
   original: string;
@@ -13,6 +15,7 @@ interface TranslatedTextProps {
   blocks: TranslationBlock[];
   targetLanguage: string;
   articleId: string;
+  showOriginal?: boolean;
 }
 
 interface WordSpanProps {
@@ -25,7 +28,35 @@ interface WordSpanProps {
 
 function WordSpan({ word, display, sentence, targetLanguage, articleId }: WordSpanProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const isMobile = useIsMobile();
 
+  // On mobile, use drawer (bottom sheet)
+  if (isMobile) {
+    return (
+      <Drawer open={isOpen} onOpenChange={setIsOpen}>
+        <DrawerTrigger asChild>
+          <span
+            className="cursor-pointer rounded-sm px-0.5 -mx-0.5 transition-colors duration-150 active:bg-[#c45c3e]/20 active:text-[#c45c3e]"
+            onClick={() => setIsOpen(true)}
+          >
+            {display}
+          </span>
+        </DrawerTrigger>
+        <DrawerContent className="max-h-[85vh]">
+          <div className="p-4 pb-8">
+            <WordTooltip
+              word={word}
+              contextSentence={sentence}
+              targetLanguage={targetLanguage}
+              articleId={articleId}
+            />
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  // On desktop, use popover
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
@@ -115,68 +146,18 @@ function TranslationChunk({
   block,
   targetLanguage,
   articleId,
+  showOriginal,
 }: {
   block: TranslationBlock;
   targetLanguage: string;
   articleId: string;
+  showOriginal: boolean;
 }) {
-  const [showOriginal, setShowOriginal] = useState(false);
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
-  const isLongPress = useRef(false);
-
-  const handleMouseDown = useCallback(() => {
-    isLongPress.current = false;
-    longPressTimer.current = setTimeout(() => {
-      isLongPress.current = true;
-      setShowOriginal(true);
-    }, 500);
-  }, []);
-
-  const handleMouseUp = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-    }
-    if (isLongPress.current) {
-      setShowOriginal(false);
-    }
-  }, []);
-
-  // Handle global keydown/keyup for Cmd/Ctrl
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Meta" || e.key === "Control") {
-        setShowOriginal(true);
-      }
-    };
-
-    const handleGlobalKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "Meta" || e.key === "Control") {
-        setShowOriginal(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleGlobalKeyDown);
-    window.addEventListener("keyup", handleGlobalKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleGlobalKeyDown);
-      window.removeEventListener("keyup", handleGlobalKeyUp);
-    };
-  }, []);
-
   // Split translated text into paragraphs (chunks may have internal \n\n breaks)
   const translatedParagraphs = block.translated.split(/\n\n+/).filter(p => p.trim());
 
   return (
-    <div
-      className="relative group"
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onTouchStart={handleMouseDown}
-      onTouchEnd={handleMouseUp}
-      tabIndex={0}
-    >
+    <div className="relative">
       {showOriginal ? (
         <OriginalText text={block.original} />
       ) : (
@@ -189,26 +170,62 @@ function TranslationChunk({
           />
         ))
       )}
-
-      {/* Hold hint - only show on first chunk paragraph */}
-      <div className="absolute -top-6 right-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none hidden md:block">
-        <span className="text-xs text-[#9a9a9a] bg-white/80 px-2 py-0.5 rounded">
-          {showOriginal ? "Original" : "Hold ⌘ for original"}
-        </span>
-      </div>
     </div>
   );
 }
 
-export function TranslatedText({ blocks, targetLanguage, articleId }: TranslatedTextProps) {
+export function TranslatedText({ blocks, targetLanguage, articleId, showOriginal = false }: TranslatedTextProps) {
+  const [localShowOriginal, setLocalShowOriginal] = useState(showOriginal);
+  const isMobile = useIsMobile();
+
+  // Sync with prop changes
+  useEffect(() => {
+    setLocalShowOriginal(showOriginal);
+  }, [showOriginal]);
+
+  // Desktop: Handle Cmd/Ctrl key for showing original
+  useEffect(() => {
+    if (isMobile) return; // Skip on mobile
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Meta" || e.key === "Control") {
+        setLocalShowOriginal(true);
+      }
+    };
+
+    const handleGlobalKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Meta" || e.key === "Control") {
+        setLocalShowOriginal(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    window.addEventListener("keyup", handleGlobalKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleGlobalKeyDown);
+      window.removeEventListener("keyup", handleGlobalKeyUp);
+    };
+  }, [isMobile]);
+
   return (
     <div className="max-w-none">
+      {/* Desktop hint */}
+      {!isMobile && (
+        <div className="hidden md:block text-right mb-4">
+          <span className="text-xs text-[#9a9a9a] bg-white/80 px-2 py-0.5 rounded">
+            {localShowOriginal ? "Showing original" : "Hold ⌘ for original"}
+          </span>
+        </div>
+      )}
+
       {blocks.map((block, index) => (
         <TranslationChunk
           key={index}
           block={block}
           targetLanguage={targetLanguage}
           articleId={articleId}
+          showOriginal={localShowOriginal}
         />
       ))}
     </div>

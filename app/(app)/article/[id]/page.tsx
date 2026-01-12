@@ -29,6 +29,7 @@ import {
 import { toast } from "@/components/ui/use-toast";
 import { TranslatedText } from "@/components/article/translated-text";
 import { AudioPlayer } from "@/components/article/audio-player";
+import { OriginalToggle } from "@/components/article/original-toggle";
 import { extractDomain } from "@/lib/utils";
 import type { Article } from "@/lib/db/schema";
 
@@ -48,6 +49,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [signedAudioUrl, setSignedAudioUrl] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Cleanup polling on unmount
@@ -525,11 +527,17 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
               <Sparkles className="h-4 w-4 text-[#c45c3e]" />
             </div>
             <p className="text-sm text-[#6b6b6b]">
-              <strong className="text-[#1a1a1a]">Tip:</strong> Click any word to see its meaning. Hold{" "}
-              <kbd className="px-1.5 py-0.5 text-xs bg-[#f3ede4] rounded border border-[#e8dfd3]">
-                Cmd
-              </kbd>{" "}
-              (or long-press on mobile) to see the original text.
+              <strong className="text-[#1a1a1a]">Tip:</strong> Tap any word to see its meaning.
+              <span className="hidden md:inline">
+                {" "}Hold{" "}
+                <kbd className="px-1.5 py-0.5 text-xs bg-[#f3ede4] rounded border border-[#e8dfd3]">
+                  Cmd
+                </kbd>{" "}
+                to see the original text.
+              </span>
+              <span className="md:hidden">
+                {" "}Use the toggle button to see the original text.
+              </span>
             </p>
           </div>
         </Card>
@@ -540,6 +548,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
             blocks={blocks}
             targetLanguage={article.targetLanguage}
             articleId={article.id}
+            showOriginal={showOriginal}
           />
         ) : (
           <div className="text-center py-12">
@@ -547,6 +556,14 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           </div>
         )}
       </article>
+
+      {/* Mobile: Floating toggle for original text */}
+      {hasContent && (
+        <OriginalToggle
+          showOriginal={showOriginal}
+          onToggle={() => setShowOriginal(!showOriginal)}
+        />
+      )}
 
       {/* Audio Player / Generate Button - only show when translation is complete */}
       {article.status === "completed" && (
