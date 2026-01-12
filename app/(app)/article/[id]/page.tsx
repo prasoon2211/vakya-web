@@ -581,6 +581,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
         <OriginalToggle
           showOriginal={showOriginal}
           onToggle={() => setShowOriginal(!showOriginal)}
+          hasAudioPlayer={!!signedAudioUrl}
         />
       )}
 

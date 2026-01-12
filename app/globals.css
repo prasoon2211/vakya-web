@@ -44,6 +44,8 @@
   html {
     background: var(--background);
     min-height: 100%;
+    /* Prevent iOS rubber-band scroll from showing content behind */
+    overscroll-behavior: none;
   }
 
   body {
@@ -52,6 +54,7 @@
     font-family: var(--font-dm-sans), system-ui, sans-serif;
     line-height: 1.7;
     min-height: 100vh;
+    overscroll-behavior: none;
   }
 
   /* Subtle paper texture overlay */
