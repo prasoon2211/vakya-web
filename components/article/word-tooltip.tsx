@@ -161,17 +161,17 @@ export function WordTooltip({
       {/* Word header */}
       <div className="flex items-start justify-between gap-2 mb-3">
         <div>
-          <h3 className="text-xl font-semibold text-white">{word}</h3>
+          <h3 className="text-xl font-semibold text-[#1a1a1a]">{word}</h3>
           {dictionaryResult?.phonetic && (
-            <p className="text-sm text-white/60">{dictionaryResult.phonetic}</p>
+            <p className="text-sm text-[#6b6b6b]">{dictionaryResult.phonetic}</p>
           )}
         </div>
         {dictionaryResult?.audioUrl && (
           <button
             onClick={playAudio}
-            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+            className="p-2 rounded-lg hover:bg-[#f3ede4] transition-colors"
           >
-            <Volume2 className="h-4 w-4 text-white/60" />
+            <Volume2 className="h-4 w-4 text-[#6b6b6b]" />
           </button>
         )}
       </div>
@@ -179,8 +179,8 @@ export function WordTooltip({
       {/* Loading state */}
       {isLoadingDict && (
         <div className="flex items-center gap-2 py-4">
-          <Loader2 className="h-4 w-4 animate-spin text-white/60" />
-          <span className="text-sm text-white/60">Looking up...</span>
+          <Loader2 className="h-4 w-4 animate-spin text-[#6b6b6b]" />
+          <span className="text-sm text-[#6b6b6b]">Looking up...</span>
         </div>
       )}
 
@@ -204,26 +204,26 @@ export function WordTooltip({
               {/* Translation from local dictionary */}
               {dictionaryResult.translation && (
                 <div>
-                  <p className="text-xs text-white/50 uppercase tracking-wide mb-1">
+                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Translation
                   </p>
-                  <p className="text-white font-medium text-lg">{dictionaryResult.translation}</p>
+                  <p className="text-[#1a1a1a] font-medium text-lg">{dictionaryResult.translation}</p>
                 </div>
               )}
               {/* Fallback to definition if no translation */}
               {!dictionaryResult.translation && dictionaryResult.definition && (
-                <p className="text-sm text-white/80">
+                <p className="text-sm text-[#4a4a4a]">
                   {dictionaryResult.definition}
                 </p>
               )}
               {dictionaryResult.example && (
-                <p className="text-sm text-white/60 italic">
+                <p className="text-sm text-[#6b6b6b] italic">
                   &ldquo;{dictionaryResult.example}&rdquo;
                 </p>
               )}
             </>
           ) : (
-            <p className="text-sm text-white/60">
+            <p className="text-sm text-[#6b6b6b]">
               {dictionaryResult.message || "No dictionary entry found"}
             </p>
           )}
@@ -292,19 +292,19 @@ export function WordTooltip({
 
           {/* Translation */}
           <div>
-            <p className="text-xs text-white/50 uppercase tracking-wide mb-1">
+            <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
               Translation
             </p>
-            <p className="text-white font-medium text-lg">{aiAnalysis.translation}</p>
+            <p className="text-[#1a1a1a] font-medium text-lg">{aiAnalysis.translation}</p>
           </div>
 
           {/* Example */}
           {aiAnalysis.example && (
             <div>
-              <p className="text-xs text-white/50 uppercase tracking-wide mb-1">
+              <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                 Example
               </p>
-              <p className="text-sm text-white/70 italic">
+              <p className="text-sm text-[#4a4a4a] italic">
                 {aiAnalysis.example}
               </p>
             </div>
@@ -313,10 +313,10 @@ export function WordTooltip({
           {/* Explanation */}
           {aiAnalysis.explanation && (
             <div>
-              <p className="text-xs text-white/50 uppercase tracking-wide mb-1">
+              <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                 Notes
               </p>
-              <p className="text-sm text-white/70">
+              <p className="text-sm text-[#4a4a4a]">
                 {aiAnalysis.explanation}
               </p>
             </div>

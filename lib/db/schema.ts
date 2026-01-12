@@ -39,6 +39,7 @@ export const articles = pgTable(
     errorMessage: text("error_message"),
     audioUrl: text("audio_url"),
     audioDurationSeconds: integer("audio_duration_seconds"),
+    audioTimestamps: text("audio_timestamps"), // JSON: WordTimestamp[] for reading mode sync
     wordCount: integer("word_count"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

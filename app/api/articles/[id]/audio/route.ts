@@ -1,10 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { toFile } from "openai/uploads";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { db, users, articles } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
+import { alignWordsToOriginal, WhisperWord } from "@/lib/audio/align-timestamps";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -148,7 +150,6 @@ export async function POST(
       voice: "coral",
       input: translatedText,
       instructions: "Speak in German with clear, native German pronunciation. Use a calm, measured pace suitable for language learners. Enunciate clearly and naturally.",
-      speed: 0.9, // Slightly slower for language learning
     });
 
     // Convert to buffer
@@ -165,16 +166,53 @@ export async function POST(
       })
     );
 
+    // Transcribe audio with Whisper to get word-level timestamps
+    let audioTimestamps: string | null = null;
+    try {
+      const audioFile = await toFile(buffer, "audio.mp3", { type: "audio/mpeg" });
+      const transcription = await openai.audio.transcriptions.create({
+        file: audioFile,
+        model: "whisper-1",
+        response_format: "verbose_json",
+        timestamp_granularities: ["word"],
+      });
+
+      // The verbose_json response includes a 'words' array when timestamp_granularities includes "word"
+      // TypeScript types don't fully reflect this, so we cast the response
+      const verboseResponse = transcription as {
+        words?: Array<{ word: string; start: number; end: number }>;
+      };
+
+      if (verboseResponse.words && verboseResponse.words.length > 0) {
+        // Align transcribed words to original text
+        const whisperWords: WhisperWord[] = verboseResponse.words.map((w) => ({
+          word: w.word,
+          start: w.start,
+          end: w.end,
+        }));
+
+        const aligned = alignWordsToOriginal(translatedText, whisperWords);
+        audioTimestamps = JSON.stringify(aligned);
+        console.log(`[Audio] Generated ${aligned.length} word timestamps for article ${id}`);
+      } else {
+        console.warn("[Audio] Whisper transcription returned no words");
+      }
+    } catch (transcriptionError) {
+      // Log error but don't fail - audio still works without timestamps
+      console.error("[Audio] Whisper transcription failed:", transcriptionError);
+    }
+
     // Estimate duration (rough: ~150 words per minute)
     const wordCount = translatedText.split(/\s+/).length;
     const estimatedDuration = Math.round((wordCount / 150) * 60);
 
-    // Update article with audio key (not full URL)
+    // Update article with audio key and timestamps
     await db
       .update(articles)
       .set({
         audioUrl: audioKey,
         audioDurationSeconds: estimatedDuration,
+        audioTimestamps,
       })
       .where(eq(articles.id, id));
 

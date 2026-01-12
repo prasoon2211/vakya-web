@@ -30,8 +30,10 @@ import { toast } from "@/components/ui/use-toast";
 import { TranslatedText } from "@/components/article/translated-text";
 import { AudioPlayer } from "@/components/article/audio-player";
 import { OriginalToggle } from "@/components/article/original-toggle";
+import { ReadingMode } from "@/components/article/reading-mode";
 import { extractDomain } from "@/lib/utils";
 import type { Article } from "@/lib/db/schema";
+import type { WordTimestamp } from "@/lib/audio/align-timestamps";
 
 interface TranslationBlock {
   original: string;
@@ -50,6 +52,8 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const [signedAudioUrl, setSignedAudioUrl] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [audioTimestamps, setAudioTimestamps] = useState<WordTimestamp[] | null>(null);
+  const [showReadingMode, setShowReadingMode] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Cleanup polling on unmount
@@ -140,6 +144,25 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
       console.error("Failed to fetch audio URL:", error);
     }
   };
+
+  const fetchTimestamps = async () => {
+    try {
+      const res = await fetch(`/api/articles/${resolvedParams.id}/timestamps`);
+      if (res.ok) {
+        const data = await res.json();
+        setAudioTimestamps(data.timestamps);
+      }
+    } catch (error) {
+      console.error("Failed to fetch timestamps:", error);
+    }
+  };
+
+  // Fetch timestamps when audio URL is available
+  useEffect(() => {
+    if (signedAudioUrl && !audioTimestamps) {
+      fetchTimestamps();
+    }
+  }, [signedAudioUrl]);
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -565,7 +588,11 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
       {article.status === "completed" && (
         <div className="fixed bottom-0 left-0 right-0 md:bottom-4 md:left-1/2 md:-translate-x-1/2 md:max-w-2xl z-50">
           {signedAudioUrl ? (
-            <AudioPlayer audioUrl={signedAudioUrl} />
+            <AudioPlayer
+              audioUrl={signedAudioUrl}
+              hasTimestamps={!!audioTimestamps && audioTimestamps.length > 0}
+              onReadingModeClick={() => setShowReadingMode(true)}
+            />
           ) : article.audioUrl ? (
             <div className="bg-white border-t md:border border-[#e8dfd3] md:rounded-2xl p-4 backdrop-blur-xl">
               <div className="flex items-center justify-center">
@@ -593,6 +620,17 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
             </div>
           )}
         </div>
+      )}
+
+      {/* Reading Mode Overlay */}
+      {showReadingMode && signedAudioUrl && audioTimestamps && audioTimestamps.length > 0 && (
+        <ReadingMode
+          audioUrl={signedAudioUrl}
+          timestamps={audioTimestamps}
+          targetLanguage={article.targetLanguage}
+          articleId={article.id}
+          onClose={() => setShowReadingMode(false)}
+        />
       )}
     </div>
   );
