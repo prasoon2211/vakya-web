@@ -43,9 +43,11 @@
 
   html {
     background: var(--background);
-    min-height: 100%;
-    /* Prevent iOS rubber-band scroll from showing content behind */
-    overscroll-behavior: none;
+    height: 100%;
+    /* iOS Safari: prevent rubber-band showing content */
+    position: fixed;
+    overflow: hidden;
+    width: 100%;
   }
 
   body {
@@ -53,8 +55,20 @@
     color: var(--foreground);
     font-family: var(--font-dm-sans), system-ui, sans-serif;
     line-height: 1.7;
-    min-height: 100vh;
-    overscroll-behavior: none;
+    height: 100%;
+    position: fixed;
+    overflow: hidden;
+    width: 100%;
+  }
+
+  /* Main scrollable wrapper - used in layout */
+  #app-scroll-wrapper {
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile */
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   /* Subtle paper texture overlay */

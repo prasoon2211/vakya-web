@@ -43,7 +43,9 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body className={`${dmSans.variable} ${fraunces.variable} ${jetbrainsMono.variable} antialiased`}>
-          {children}
+          <div id="app-scroll-wrapper">
+            {children}
+          </div>
           <Toaster />
         </body>
       </html>
