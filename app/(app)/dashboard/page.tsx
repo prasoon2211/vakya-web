@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Globe, Headphones, Loader2, Sparkles, ArrowRight, BookOpen, ExternalLink, RefreshCw, AlertCircle } from "lucide-react";
+import { Globe, Headphones, Loader2, Sparkles, ArrowRight, BookOpen, ExternalLink, RefreshCw, AlertCircle, Trash2, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -15,6 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/use-toast";
 import { LANGUAGES, CEFR_LEVELS, type Article } from "@/lib/db/schema";
 import { formatRelativeTime, extractDomain } from "@/lib/utils";
@@ -211,6 +217,36 @@ export default function DashboardPage() {
       pollingRef.current = null;
     }
     setTranslationState({ status: "idle" });
+  };
+
+  const handleDeleteArticle = async (articleId: string, e: React.MouseEvent) => {
+    e.preventDefault(); // Prevent navigation
+    e.stopPropagation();
+
+    try {
+      const res = await fetch(`/api/articles/${articleId}`, {
+        method: "DELETE",
+      });
+
+      if (res.ok) {
+        setArticles(prev => prev.filter(a => a.id !== articleId));
+        toast({
+          title: "Article deleted",
+          variant: "success",
+        });
+      } else {
+        toast({
+          title: "Failed to delete article",
+          variant: "error",
+        });
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      toast({
+        title: "Failed to delete article",
+        variant: "error",
+      });
+    }
   };
 
   const getStatusMessage = () => {
@@ -547,43 +583,63 @@ export default function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {articles.map((article, index) => (
-              <Link
+              <div
                 key={article.id}
-                href={`/article/${article.id}`}
-                className="opacity-0 animate-fade-up"
+                className="opacity-0 animate-fade-up relative"
                 style={{ animationDelay: `${0.1 * (index + 3)}s`, animationFillMode: 'forwards' }}
               >
-                <Card className="p-5 h-full cursor-pointer group">
-                  <div className="flex items-start justify-between gap-4 mb-3">
-                    <h3 className="font-medium text-[#1a1a1a] group-hover:text-[#c45c3e] transition-colors line-clamp-2">
-                      {article.title || "Untitled Article"}
-                    </h3>
-                    <ArrowRight className="w-4 h-4 flex-shrink-0 text-[#9a9a9a] group-hover:text-[#c45c3e] group-hover:translate-x-0.5 transition-all" />
-                  </div>
+                <Link href={`/article/${article.id}`}>
+                  <Card className="p-5 h-full cursor-pointer group">
+                    <div className="flex items-start gap-4 mb-3 pr-8">
+                      <h3 className="font-medium text-[#1a1a1a] group-hover:text-[#c45c3e] transition-colors line-clamp-2 flex-1">
+                        {article.title || "Untitled Article"}
+                      </h3>
+                    </div>
 
-                  <div className="flex items-center gap-2 text-sm text-[#9a9a9a] mb-4">
-                    <ExternalLink className="w-3 h-3" />
-                    <span className="truncate">{extractDomain(article.sourceUrl)}</span>
-                    <span className="flex-shrink-0">·</span>
-                    <span className="flex-shrink-0">{article.wordCount || 0} words</span>
-                    {article.audioUrl && (
-                      <>
-                        <span className="flex-shrink-0">·</span>
-                        <Headphones className="w-3.5 h-3.5 flex-shrink-0 text-[#2d5a47]" />
-                      </>
-                    )}
-                  </div>
+                    <div className="flex items-center gap-2 text-sm text-[#9a9a9a] mb-4">
+                      <ExternalLink className="w-3 h-3" />
+                      <span className="truncate">{extractDomain(article.sourceUrl)}</span>
+                      <span className="flex-shrink-0">·</span>
+                      <span className="flex-shrink-0">{article.wordCount || 0} words</span>
+                      {article.audioUrl && (
+                        <>
+                          <span className="flex-shrink-0">·</span>
+                          <Headphones className="w-3.5 h-3.5 flex-shrink-0 text-[#2d5a47]" />
+                        </>
+                      )}
+                    </div>
 
-                  <div className="flex items-center justify-between">
-                    <Badge>
-                      {article.targetLanguage} {article.cefrLevel}
-                    </Badge>
-                    <span className="text-xs text-[#9a9a9a]">
-                      {formatRelativeTime(article.createdAt)}
-                    </span>
-                  </div>
-                </Card>
-              </Link>
+                    <div className="flex items-center justify-between">
+                      <Badge>
+                        {article.targetLanguage} {article.cefrLevel}
+                      </Badge>
+                      <span className="text-xs text-[#9a9a9a]">
+                        {formatRelativeTime(article.createdAt)}
+                      </span>
+                    </div>
+                  </Card>
+                </Link>
+                {/* Delete button - absolute positioned */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className="absolute top-3 right-3 p-1.5 rounded-md hover:bg-[#f3ede4] text-[#9a9a9a] hover:text-[#6b6b6b] transition-colors z-10"
+                      onClick={(e) => e.preventDefault()}
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                      onClick={(e) => handleDeleteArticle(article.id, e)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete article
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ))}
           </div>
         )}

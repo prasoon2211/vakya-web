@@ -31,6 +31,7 @@ export const articles = pgTable(
     originalContent: text("original_content"),
     translatedContent: text("translated_content"),
     targetLanguage: text("target_language").notNull(),
+    sourceLanguage: text("source_language"), // Detected language of original content
     cefrLevel: text("cefr_level").notNull(),
     // Translation status tracking
     status: text("status").default("pending").notNull(), // pending, fetching, translating, completed, failed

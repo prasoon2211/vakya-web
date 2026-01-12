@@ -16,6 +16,7 @@ interface TranslatedTextProps {
   targetLanguage: string;
   articleId: string;
   showOriginal?: boolean;
+  isOriginalContent?: boolean; // When source = target, hide toggle hints
 }
 
 interface WordSpanProps {
@@ -178,7 +179,7 @@ function TranslationChunk({
   );
 }
 
-export function TranslatedText({ blocks, targetLanguage, articleId, showOriginal = false }: TranslatedTextProps) {
+export function TranslatedText({ blocks, targetLanguage, articleId, showOriginal = false, isOriginalContent = false }: TranslatedTextProps) {
   const [localShowOriginal, setLocalShowOriginal] = useState(showOriginal);
   const isMobile = useIsMobile();
 
@@ -187,9 +188,9 @@ export function TranslatedText({ blocks, targetLanguage, articleId, showOriginal
     setLocalShowOriginal(showOriginal);
   }, [showOriginal]);
 
-  // Desktop: Handle Cmd/Ctrl key for showing original
+  // Desktop: Handle Cmd/Ctrl key for showing original (skip if original content)
   useEffect(() => {
-    if (isMobile) return; // Skip on mobile
+    if (isMobile || isOriginalContent) return; // Skip on mobile or when source = target
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Meta" || e.key === "Control") {
@@ -210,12 +211,12 @@ export function TranslatedText({ blocks, targetLanguage, articleId, showOriginal
       window.removeEventListener("keydown", handleGlobalKeyDown);
       window.removeEventListener("keyup", handleGlobalKeyUp);
     };
-  }, [isMobile]);
+  }, [isMobile, isOriginalContent]);
 
   return (
     <div className="max-w-none">
-      {/* Desktop hint */}
-      {!isMobile && (
+      {/* Desktop hint - hide when source = target */}
+      {!isMobile && !isOriginalContent && (
         <div className="hidden md:block text-right mb-4">
           <span className="text-xs text-[#9a9a9a] bg-white/80 px-2 py-0.5 rounded">
             {localShowOriginal ? "Showing original" : "Hold ⌘ for original"}

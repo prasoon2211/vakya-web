@@ -346,6 +346,9 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const isTranslationFailed = article.status === "failed";
   const hasContent = blocks.length > 0;
 
+  // Check if this is original content (source = target, no translation happened)
+  const isOriginalContent = article.sourceLanguage?.toLowerCase() === article.targetLanguage.toLowerCase();
+
   // If fetching with no content, show loading state
   if (article.status === "fetching" && !hasContent) {
     return (
@@ -577,11 +580,15 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
             </div>
             <p className="text-sm text-[#6b6b6b]">
               <strong className="text-[#1a1a1a]">Tip:</strong> Tap any word to see its meaning.
-              Hold{" "}
-              <kbd className="px-1.5 py-0.5 text-xs bg-[#f3ede4] rounded border border-[#e8dfd3]">
-                Cmd
-              </kbd>{" "}
-              to see the original text.
+              {!isOriginalContent && (
+                <>
+                  {" "}Hold{" "}
+                  <kbd className="px-1.5 py-0.5 text-xs bg-[#f3ede4] rounded border border-[#e8dfd3]">
+                    Cmd
+                  </kbd>{" "}
+                  to see the original text.
+                </>
+              )}
             </p>
           </div>
         </Card>
@@ -593,6 +600,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
             targetLanguage={article.targetLanguage}
             articleId={article.id}
             showOriginal={showOriginal}
+            isOriginalContent={isOriginalContent}
           />
         ) : (
           <div className="text-center py-12">
@@ -601,8 +609,8 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
         )}
       </article>
 
-      {/* Mobile: Floating toggle for original text */}
-      {hasContent && (
+      {/* Mobile: Floating toggle for original text - hide when source = target */}
+      {hasContent && !isOriginalContent && (
         <OriginalToggle
           showOriginal={showOriginal}
           onToggle={() => setShowOriginal(!showOriginal)}
