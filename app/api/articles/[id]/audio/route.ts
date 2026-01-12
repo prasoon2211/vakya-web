@@ -26,6 +26,13 @@ interface TranslationBlock {
   translated: string;
 }
 
+// Language-specific TTS instructions for natural pronunciation
+const TTS_INSTRUCTIONS: Record<string, string> = {
+  German: "Speak in German with clear, native German pronunciation. Use a calm, measured pace suitable for language learners. Enunciate clearly and naturally.",
+  Spanish: "Speak in Spanish with clear, native Spanish pronunciation. Use a calm, measured pace suitable for language learners. Enunciate clearly and naturally.",
+  French: "Speak in French with clear, native French pronunciation. Use a calm, measured pace suitable for language learners. Enunciate clearly and naturally.",
+};
+
 // GET - Get signed URL for existing audio
 export async function GET(
   request: Request,
@@ -144,12 +151,13 @@ export async function POST(
       .join("\n\n")
       .slice(0, 4096); // OpenAI TTS limit
 
-    // Generate audio with OpenAI TTS (gpt-4o-mini-tts with German instructions)
+    // Generate audio with OpenAI TTS using language-specific instructions
+    const ttsInstructions = TTS_INSTRUCTIONS[article.targetLanguage] || TTS_INSTRUCTIONS.German;
     const mp3 = await openai.audio.speech.create({
       model: "gpt-4o-mini-tts",
       voice: "coral",
       input: translatedText,
-      instructions: "Speak in German with clear, native German pronunciation. Use a calm, measured pace suitable for language learners. Enunciate clearly and naturally.",
+      instructions: ttsInstructions,
     });
 
     // Convert to buffer
