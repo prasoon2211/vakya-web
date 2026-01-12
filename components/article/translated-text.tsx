@@ -44,7 +44,7 @@ function WordSpan({ word, display, sentence, targetLanguage, articleId }: WordSp
         </DrawerTrigger>
         <DrawerContent className="max-h-[85vh]">
           <DrawerTitle className="sr-only">Word Definition</DrawerTitle>
-          <div className="px-6 pt-2 pb-10">
+          <div className="px-6 pt-2 pb-10 overflow-y-auto flex-1">
             <WordTooltip
               word={word}
               contextSentence={sentence}
