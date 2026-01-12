@@ -1,34 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Globe, Sparkles, Headphones, BookMarked, ArrowRight, Play, BookOpen, Languages, Pen } from "lucide-react";
-
-const features = [
-  {
-    icon: Globe,
-    title: "Any article, your level",
-    description: "Paste any URL and get it translated at your exact CEFR proficiency level, from A1 to C2.",
-    accent: "terracotta",
-  },
-  {
-    icon: Sparkles,
-    title: "Click to understand",
-    description: "Tap any word to instantly see translations, grammar breakdowns, and contextual usage.",
-    accent: "forest",
-  },
-  {
-    icon: Headphones,
-    title: "Listen and learn",
-    description: "Generate natural AI audio for any article. Perfect for commutes or reading along.",
-    accent: "inkblue",
-  },
-  {
-    icon: BookMarked,
-    title: "Build vocabulary",
-    description: "Save words you discover and review them later with spaced repetition.",
-    accent: "terracotta",
-  },
-];
+import { ArrowRight, BookOpen, Sparkles, Volume2 } from "lucide-react";
 
 export default async function LandingPage() {
   const { userId } = await auth();
@@ -38,250 +11,186 @@ export default async function LandingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#faf7f2] text-[#1a1a1a]">
+    <div className="min-h-screen bg-[#fffbf5] text-[#2d2a26] overflow-x-hidden">
+      {/* Subtle grain texture overlay */}
+      <div
+        className="fixed inset-0 pointer-events-none opacity-[0.03] z-50"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
+        }}
+      />
+
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-[#faf7f2]/80 backdrop-blur-md border-b border-[#e8dfd3]">
+      <header className="fixed top-0 left-0 right-0 z-40 bg-[#fffbf5]/90 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-xl bg-[#c45c3e] flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow">
-              <span className="font-serif text-xl font-bold text-white">V</span>
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <div className="w-9 h-9 rounded-lg bg-[#c45c3e] flex items-center justify-center transform group-hover:rotate-[-4deg] transition-transform">
+              <span className="font-serif text-lg font-bold text-white">V</span>
             </div>
-            <span className="text-xl font-semibold text-[#1a1a1a]">Vakya</span>
+            <span className="text-lg font-medium text-[#2d2a26]">Vakya</span>
           </Link>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-6">
             <Link
               href="/sign-in"
-              className="text-sm text-[#6b6b6b] hover:text-[#1a1a1a] transition-colors ink-underline"
+              className="text-sm text-[#6b6560] hover:text-[#2d2a26] transition-colors"
             >
-              Sign In
+              Sign in
             </Link>
             <Link
               href="/sign-up"
-              className="px-5 py-2.5 rounded-xl bg-[#1a1a1a] text-sm font-medium text-white hover:bg-[#3d3d3d] transition-all shadow-sm hover:shadow-md"
+              className="px-4 py-2 rounded-lg bg-[#2d2a26] text-sm font-medium text-[#fffbf5] hover:bg-[#1a1816] transition-colors"
             >
-              Get Started
+              Start reading
             </Link>
           </div>
         </div>
       </header>
 
       {/* Hero Section */}
-      <section className="pt-32 pb-24 px-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            {/* Left side - Text */}
-            <div className="opacity-0 animate-fade-up" style={{ animationDelay: '0.1s', animationFillMode: 'forwards' }}>
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#f3ede4] border border-[#e8dfd3] text-[#6b6b6b] text-sm mb-8">
-                <Languages className="w-4 h-4 text-[#c45c3e]" />
-                Now supporting 20+ languages
-              </div>
+      <section className="pt-32 pb-20 px-6 relative">
+        {/* Decorative blob */}
+        <div className="absolute top-20 right-0 w-[500px] h-[500px] bg-[#c45c3e]/[0.07] rounded-full blur-3xl -z-10" />
+        <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#2d5a47]/[0.05] rounded-full blur-3xl -z-10" />
 
-              <h1 className="font-serif text-5xl lg:text-6xl font-bold text-[#1a1a1a] leading-[1.1] mb-6">
-                Read what you love.{" "}
-                <span className="text-gradient">Learn as you go.</span>
-              </h1>
-
-              <p className="text-xl text-[#6b6b6b] leading-relaxed mb-10 max-w-lg">
-                Transform any article into a personalized language lesson.
-                Click words for instant meanings, listen with AI audio,
-                and watch your vocabulary grow naturally.
-              </p>
-
-              <div className="flex flex-wrap gap-4 mb-12">
-                <Link
-                  href="/sign-up"
-                  className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-[#c45c3e] text-base font-semibold text-white hover:bg-[#a34a30] transition-all shadow-md hover:shadow-lg group"
-                >
-                  Start Learning Free
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </Link>
-                <Link
-                  href="#demo"
-                  className="inline-flex items-center gap-2 px-8 py-4 rounded-xl border border-[#e8dfd3] text-base font-medium text-[#3d3d3d] hover:bg-[#f3ede4] transition-all"
-                >
-                  <Play className="w-5 h-5" />
-                  See how it works
-                </Link>
-              </div>
-
-              {/* Stats - horizontal with dividers */}
-              <div className="flex items-center gap-8 pt-8 border-t border-[#e8dfd3]">
-                <div>
-                  <div className="font-serif text-3xl font-bold text-[#1a1a1a]">20+</div>
-                  <div className="text-sm text-[#9a9a9a]">Languages</div>
-                </div>
-                <div className="w-px h-10 bg-[#e8dfd3]"></div>
-                <div>
-                  <div className="font-serif text-3xl font-bold text-[#1a1a1a]">A1-C2</div>
-                  <div className="text-sm text-[#9a9a9a]">All Levels</div>
-                </div>
-                <div className="w-px h-10 bg-[#e8dfd3]"></div>
-                <div>
-                  <div className="font-serif text-3xl font-bold text-[#1a1a1a]">Free</div>
-                  <div className="text-sm text-[#9a9a9a]">To Start</div>
-                </div>
-              </div>
+        <div className="max-w-5xl mx-auto">
+          <div className="max-w-3xl">
+            {/* Handwritten-style label */}
+            <div className="inline-block mb-8 opacity-0 animate-fade-up" style={{ animationDelay: '0.1s', animationFillMode: 'forwards' }}>
+              <span className="text-[#c45c3e] text-sm tracking-wide" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
+                for the curious reader
+              </span>
             </div>
 
-            {/* Right side - Demo card */}
-            <div className="relative opacity-0 animate-fade-up" style={{ animationDelay: '0.3s', animationFillMode: 'forwards' }}>
-              <div className="rounded-2xl border border-[#e8dfd3] bg-white p-8 shadow-lg">
-                {/* Browser chrome */}
-                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[#f3ede4]">
-                  <div className="flex gap-1.5">
-                    <div className="w-3 h-3 rounded-full bg-[#c45c3e]"></div>
-                    <div className="w-3 h-3 rounded-full bg-[#d4a574]"></div>
-                    <div className="w-3 h-3 rounded-full bg-[#2d5a47]"></div>
-                  </div>
-                  <div className="flex-1 text-center text-xs text-[#9a9a9a] font-mono">
-                    vakya.app/article
-                  </div>
-                </div>
+            <h1
+              className="font-serif text-5xl sm:text-6xl lg:text-7xl font-normal text-[#2d2a26] leading-[1.1] mb-8 opacity-0 animate-fade-up"
+              style={{ animationDelay: '0.2s', animationFillMode: 'forwards' }}
+            >
+              Read the world.{" "}
+              <span className="relative inline-block">
+                <span className="relative z-10">Word by word.</span>
+                <svg className="absolute -bottom-2 left-0 w-full h-3 text-[#c45c3e]/30" viewBox="0 0 200 12" preserveAspectRatio="none">
+                  <path d="M0,8 Q50,0 100,8 T200,8" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/>
+                </svg>
+              </span>
+            </h1>
 
-                {/* Demo content */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <span className="px-3 py-1 rounded-md bg-[#2d5a47]/10 text-[#2d5a47] text-xs font-medium border border-[#2d5a47]/20">
-                      German B1
-                    </span>
-                    <span className="text-xs text-[#9a9a9a]">Der Spiegel</span>
-                  </div>
-
-                  <p className="font-serif text-2xl text-[#1a1a1a] leading-relaxed">
-                    <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">Die</span>{" "}
-                    <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">Sonne</span>{" "}
-                    <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">scheint</span>{" "}
-                    <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">heute</span>{" "}
-                    <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">besonders</span>{" "}
-                    <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">hell</span>...
-                  </p>
-
-                  <p className="text-sm text-[#9a9a9a] italic border-l-2 border-[#c45c3e] pl-4">
-                    &ldquo;The sun shines especially bright today...&rdquo;
-                  </p>
-                </div>
-
-                {/* Audio player preview */}
-                <div className="mt-6 p-4 rounded-xl bg-[#faf7f2] border border-[#e8dfd3]">
-                  <div className="flex items-center gap-4">
-                    <button className="w-10 h-10 rounded-full bg-[#c45c3e] flex items-center justify-center shadow-sm hover:shadow-md transition-shadow">
-                      <Play className="w-4 h-4 text-white ml-0.5" />
-                    </button>
-                    <div className="flex-1 h-1.5 bg-[#e8dfd3] rounded-full overflow-hidden">
-                      <div className="w-1/3 h-full bg-[#c45c3e] rounded-full"></div>
-                    </div>
-                    <span className="text-xs text-[#9a9a9a] font-mono">0:42</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Decorative elements */}
-              <div className="absolute -top-4 -right-4 w-24 h-24 bg-[#c45c3e]/5 rounded-full blur-2xl -z-10"></div>
-              <div className="absolute -bottom-4 -left-4 w-32 h-32 bg-[#2d5a47]/5 rounded-full blur-2xl -z-10"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section className="py-24 px-6 bg-white border-y border-[#e8dfd3]">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <div className="decorative-rule mx-auto mb-6"></div>
-            <h2 className="font-serif text-4xl lg:text-5xl font-bold text-[#1a1a1a] mb-6">
-              Everything you need to{" "}
-              <span className="text-gradient">learn effectively</span>
-            </h2>
-            <p className="text-lg text-[#6b6b6b] max-w-2xl mx-auto">
-              Vakya combines intelligent translation, interactive learning, and natural audio
-              to create the most effective reading-based language learning experience.
+            <p
+              className="text-xl text-[#6b6560] leading-relaxed mb-10 max-w-xl opacity-0 animate-fade-up"
+              style={{ animationDelay: '0.3s', animationFillMode: 'forwards' }}
+            >
+              Paste any article. Get it translated to your level.
+              Click any word to understand it. That&apos;s it — language learning
+              that fits into the reading you already love.
             </p>
+
+            <div
+              className="flex flex-wrap items-center gap-4 mb-16 opacity-0 animate-fade-up"
+              style={{ animationDelay: '0.4s', animationFillMode: 'forwards' }}
+            >
+              <Link
+                href="/sign-up"
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-[#c45c3e] text-base font-medium text-white hover:bg-[#a84832] transition-all shadow-sm hover:shadow-md group"
+              >
+                Start learning free
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+              </Link>
+              <span className="text-sm text-[#9a9590]">No credit card needed</span>
+            </div>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6">
-            {features.map((feature, index) => {
-              const Icon = feature.icon;
-              const accentColors: Record<string, { bg: string; icon: string; border: string }> = {
-                terracotta: { bg: 'bg-[#c45c3e]/10', icon: 'text-[#c45c3e]', border: 'hover:border-[#c45c3e]/30' },
-                forest: { bg: 'bg-[#2d5a47]/10', icon: 'text-[#2d5a47]', border: 'hover:border-[#2d5a47]/30' },
-                inkblue: { bg: 'bg-[#2c4a6e]/10', icon: 'text-[#2c4a6e]', border: 'hover:border-[#2c4a6e]/30' },
-              };
-              const colors = accentColors[feature.accent];
+          {/* Language cards - featuring our 3 languages with personality */}
+          <div
+            className="grid sm:grid-cols-3 gap-4 opacity-0 animate-fade-up"
+            style={{ animationDelay: '0.5s', animationFillMode: 'forwards' }}
+          >
+            {/* German */}
+            <div className="group p-6 rounded-2xl bg-white border border-[#e8e4dd] hover:border-[#c45c3e]/30 hover:shadow-lg transition-all duration-300 cursor-default">
+              <div className="text-3xl mb-3">🇩🇪</div>
+              <h3 className="font-serif text-xl text-[#2d2a26] mb-1">Deutsch</h3>
+              <p className="text-sm text-[#9a9590] leading-relaxed">
+                From Kafka to Der Spiegel — tackle compound words with confidence
+              </p>
+              <div className="mt-4 pt-4 border-t border-[#f3f0eb]">
+                <p className="font-serif text-[#6b6560] italic text-sm">&ldquo;Wanderlust, Zeitgeist, Gemütlichkeit...&rdquo;</p>
+              </div>
+            </div>
 
-              return (
-                <div
-                  key={feature.title}
-                  className={`p-8 rounded-2xl bg-[#faf7f2] border border-[#e8dfd3] ${colors.border} hover:shadow-md transition-all duration-300 opacity-0 animate-fade-up`}
-                  style={{ animationDelay: `${0.1 * (index + 1)}s`, animationFillMode: 'forwards' }}
-                >
-                  <div className={`w-14 h-14 rounded-xl ${colors.bg} flex items-center justify-center mb-5`}>
-                    <Icon className={`w-6 h-6 ${colors.icon}`} />
-                  </div>
-                  <h3 className="font-serif text-xl font-semibold text-[#1a1a1a] mb-3">
-                    {feature.title}
-                  </h3>
-                  <p className="text-[#6b6b6b] leading-relaxed">
-                    {feature.description}
-                  </p>
-                </div>
-              );
-            })}
+            {/* Spanish */}
+            <div className="group p-6 rounded-2xl bg-white border border-[#e8e4dd] hover:border-[#2d5a47]/30 hover:shadow-lg transition-all duration-300 cursor-default">
+              <div className="text-3xl mb-3">🇪🇸</div>
+              <h3 className="font-serif text-xl text-[#2d2a26] mb-1">Español</h3>
+              <p className="text-sm text-[#9a9590] leading-relaxed">
+                From García Márquez to El País — navigate subjunctive with ease
+              </p>
+              <div className="mt-4 pt-4 border-t border-[#f3f0eb]">
+                <p className="font-serif text-[#6b6560] italic text-sm">&ldquo;Sobremesa, madrugada, estrenar...&rdquo;</p>
+              </div>
+            </div>
+
+            {/* French */}
+            <div className="group p-6 rounded-2xl bg-white border border-[#e8e4dd] hover:border-[#2c4a6e]/30 hover:shadow-lg transition-all duration-300 cursor-default">
+              <div className="text-3xl mb-3">🇫🇷</div>
+              <h3 className="font-serif text-xl text-[#2d2a26] mb-1">Français</h3>
+              <p className="text-sm text-[#9a9590] leading-relaxed">
+                From Camus to Le Monde — master liaisons and faux amis
+              </p>
+              <div className="mt-4 pt-4 border-t border-[#f3f0eb]">
+                <p className="font-serif text-[#6b6560] italic text-sm">&ldquo;Dépaysement, flâner, retrouvailles...&rdquo;</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Demo Section */}
-      <section id="demo" className="py-24 px-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="rounded-3xl border border-[#e8dfd3] bg-white p-12 shadow-lg">
-            <div className="text-center mb-10">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#c45c3e]/10 mb-6">
-                <Pen className="w-7 h-7 text-[#c45c3e]" />
+      {/* How it works - more intimate, less corporate */}
+      <section className="py-24 px-6 bg-[#2d2a26] text-[#fffbf5] relative overflow-hidden">
+        {/* Subtle pattern */}
+        <div className="absolute inset-0 opacity-[0.02]" style={{
+          backgroundImage: `radial-gradient(circle at 1px 1px, white 1px, transparent 0)`,
+          backgroundSize: '32px 32px'
+        }} />
+
+        <div className="max-w-5xl mx-auto relative">
+          <div className="max-w-xl mb-16">
+            <span className="text-[#c45c3e] text-sm tracking-wide mb-4 block" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
+              how it works
+            </span>
+            <h2 className="font-serif text-4xl lg:text-5xl font-normal leading-tight">
+              Three steps to reading fluency
+            </h2>
+          </div>
+
+          <div className="grid lg:grid-cols-3 gap-8 lg:gap-12">
+            <div className="relative">
+              <div className="text-7xl font-serif text-[#c45c3e]/20 absolute -top-4 -left-2">1</div>
+              <div className="relative pt-8">
+                <h3 className="font-serif text-xl mb-3">Paste any article</h3>
+                <p className="text-[#a8a5a0] leading-relaxed">
+                  News, blogs, Wikipedia — if it&apos;s on the web, you can learn from it.
+                  We extract the content and prepare it for you.
+                </p>
               </div>
-              <h2 className="font-serif text-3xl lg:text-4xl font-bold text-[#1a1a1a] mb-4">
-                Try it yourself
-              </h2>
-              <p className="text-[#6b6b6b]">
-                Hover over any word to see the interaction — just like in the real app
-              </p>
             </div>
 
-            <div className="p-8 rounded-2xl bg-[#faf7f2] border border-[#e8dfd3]">
-              <div className="flex items-center gap-3 mb-6">
-                <span className="px-3 py-1.5 rounded-lg bg-[#2d5a47]/10 text-[#2d5a47] text-sm font-medium border border-[#2d5a47]/20">
-                  German B1
-                </span>
-                <span className="text-sm text-[#9a9a9a]">Sample Article</span>
+            <div className="relative">
+              <div className="text-7xl font-serif text-[#c45c3e]/20 absolute -top-4 -left-2">2</div>
+              <div className="relative pt-8">
+                <h3 className="font-serif text-xl mb-3">Choose your level</h3>
+                <p className="text-[#a8a5a0] leading-relaxed">
+                  A1 beginner to C2 native — we rewrite the article to match your proficiency.
+                  The same story, adapted for where you are.
+                </p>
               </div>
-
-              <p className="font-serif text-3xl text-[#1a1a1a] leading-relaxed mb-6">
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">Die</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">Sonne</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">scheint</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">heute</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">besonders</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">hell</span>.{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">Es</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">ist</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">ein</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">wunderschöner</span>{" "}
-                <span className="hover:bg-[#c45c3e]/10 hover:text-[#a34a30] px-1 rounded cursor-pointer transition-all">Tag</span>.
-              </p>
-
-              <p className="text-[#6b6b6b] italic border-l-2 border-[#c45c3e] pl-4">
-                &ldquo;The sun shines especially bright today. It is a beautiful day.&rdquo;
-              </p>
             </div>
 
-            <div className="mt-6 p-4 rounded-xl bg-[#2d5a47]/5 border border-[#2d5a47]/10">
-              <div className="flex items-start gap-4">
-                <div className="w-8 h-8 rounded-lg bg-[#2d5a47]/10 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-4 h-4 text-[#2d5a47]" />
-                </div>
-                <p className="text-sm text-[#6b6b6b]">
-                  <strong className="text-[#1a1a1a]">Pro tip:</strong> In the full app, click any word
-                  to save it to your vocabulary list for spaced repetition review.
+            <div className="relative">
+              <div className="text-7xl font-serif text-[#c45c3e]/20 absolute -top-4 -left-2">3</div>
+              <div className="relative pt-8">
+                <h3 className="font-serif text-xl mb-3">Read and discover</h3>
+                <p className="text-[#a8a5a0] leading-relaxed">
+                  Click any word for instant meaning. Save words you want to remember.
+                  Listen with natural AI audio. Learn as you go.
                 </p>
               </div>
             </div>
@@ -289,51 +198,172 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* Interactive Demo Section */}
       <section className="py-24 px-6">
         <div className="max-w-4xl mx-auto">
-          <div className="rounded-3xl bg-[#1a1a1a] p-16 text-center relative overflow-hidden">
-            {/* Decorative elements */}
-            <div className="absolute top-0 left-0 w-64 h-64 bg-[#c45c3e]/20 rounded-full blur-3xl"></div>
-            <div className="absolute bottom-0 right-0 w-64 h-64 bg-[#2d5a47]/20 rounded-full blur-3xl"></div>
+          <div className="text-center mb-12">
+            <span className="text-[#c45c3e] text-sm tracking-wide mb-4 block" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
+              try it yourself
+            </span>
+            <h2 className="font-serif text-3xl lg:text-4xl text-[#2d2a26]">
+              Hover over any word
+            </h2>
+          </div>
 
-            <div className="relative">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/10 mb-8">
-                <BookOpen className="w-7 h-7 text-white" />
+          {/* Demo card - styled like a reading page */}
+          <div className="rounded-2xl bg-white border border-[#e8e4dd] shadow-xl overflow-hidden">
+            {/* Article header */}
+            <div className="px-8 py-5 border-b border-[#f3f0eb] flex items-center justify-between bg-[#faf8f5]">
+              <div className="flex items-center gap-3">
+                <span className="px-2.5 py-1 rounded-md bg-[#2d5a47]/10 text-[#2d5a47] text-xs font-medium">
+                  German · B1
+                </span>
+                <span className="text-sm text-[#9a9590]">Der Spiegel</span>
               </div>
-              <h2 className="font-serif text-4xl lg:text-5xl font-bold text-white mb-6">
-                Start your journey today
-              </h2>
-              <p className="text-lg text-white/70 mb-10 max-w-xl mx-auto">
-                Join language learners who use Vakya to read content they love
-                while building vocabulary naturally. No flashcard grind required.
+              <div className="flex items-center gap-2">
+                <button className="p-2 rounded-lg hover:bg-[#f3f0eb] transition-colors">
+                  <Volume2 className="w-4 h-4 text-[#6b6560]" />
+                </button>
+                <button className="p-2 rounded-lg hover:bg-[#f3f0eb] transition-colors">
+                  <BookOpen className="w-4 h-4 text-[#6b6560]" />
+                </button>
+              </div>
+            </div>
+
+            {/* Article content */}
+            <div className="p-8 lg:p-12">
+              <p className="font-serif text-2xl lg:text-3xl text-[#2d2a26] leading-relaxed mb-6">
+                {["Die", "Sonne", "scheint", "heute", "besonders", "hell"].map((word, i) => (
+                  <span
+                    key={i}
+                    className="hover:bg-[#c45c3e]/10 hover:text-[#a84832] px-1 py-0.5 rounded cursor-pointer transition-all duration-150 inline-block"
+                  >
+                    {word}
+                  </span>
+                ))}{". "}
+                {["Es", "ist", "ein", "wunderschöner", "Tag", "zum", "Spazierengehen"].map((word, i) => (
+                  <span
+                    key={i}
+                    className="hover:bg-[#c45c3e]/10 hover:text-[#a84832] px-1 py-0.5 rounded cursor-pointer transition-all duration-150 inline-block"
+                  >
+                    {word}
+                  </span>
+                ))}{"."}
               </p>
-              <Link
-                href="/sign-up"
-                className="inline-flex items-center gap-2 px-10 py-4 rounded-xl bg-white text-lg font-semibold text-[#1a1a1a] hover:bg-[#f3ede4] transition-all shadow-lg group"
-              >
-                Get Started Free
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </Link>
-              <p className="mt-6 text-sm text-white/50">
-                Free forever for core features. No credit card required.
-              </p>
+
+              <div className="flex items-start gap-3 text-[#6b6560]">
+                <div className="w-1 h-full min-h-[3rem] bg-[#c45c3e]/30 rounded-full flex-shrink-0" />
+                <p className="italic leading-relaxed">
+                  &ldquo;The sun shines especially bright today. It is a beautiful day for a walk.&rdquo;
+                </p>
+              </div>
+            </div>
+
+            {/* Word tooltip preview */}
+            <div className="mx-8 mb-8 p-5 rounded-xl bg-[#2d2a26] text-white">
+              <div className="flex items-start gap-4">
+                <Sparkles className="w-5 h-5 text-[#c45c3e] flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-serif text-lg">wunderschön</span>
+                    <span className="text-xs text-white/50 bg-white/10 px-2 py-0.5 rounded">adjective</span>
+                  </div>
+                  <p className="text-white/70 text-sm mb-2">beautiful, wonderful, gorgeous</p>
+                  <p className="text-white/50 text-xs italic">&ldquo;wunder&rdquo; (miracle) + &ldquo;schön&rdquo; (beautiful)</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-[#e8dfd3] py-12 px-6">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#c45c3e] flex items-center justify-center">
-              <span className="font-serif text-lg font-bold text-white">V</span>
+      {/* Features - more personal, less checkbox */}
+      <section className="py-24 px-6 bg-[#f8f5f0]">
+        <div className="max-w-5xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-16 items-center">
+            <div>
+              <span className="text-[#c45c3e] text-sm tracking-wide mb-4 block" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
+                built for learners
+              </span>
+              <h2 className="font-serif text-3xl lg:text-4xl text-[#2d2a26] mb-6 leading-tight">
+                Every word you meet becomes a word you know
+              </h2>
+              <p className="text-[#6b6560] leading-relaxed mb-8">
+                Vakya isn&apos;t about grinding flashcards. It&apos;s about reading things you actually
+                care about, and learning naturally along the way. Like picking up words
+                from a conversation, but at your own pace.
+              </p>
+              <Link
+                href="/sign-up"
+                className="inline-flex items-center gap-2 text-[#c45c3e] font-medium hover:gap-3 transition-all"
+              >
+                Start your first article
+                <ArrowRight className="w-4 h-4" />
+              </Link>
             </div>
-            <span className="font-semibold text-[#1a1a1a]">Vakya</span>
+
+            <div className="space-y-4">
+              {[
+                { title: "Smart translations", desc: "Adapted to your CEFR level — A1 to C2" },
+                { title: "One-click meanings", desc: "Instant word lookups with context" },
+                { title: "Natural audio", desc: "AI voices that sound like native speakers" },
+                { title: "Vocabulary builder", desc: "Save words and review with spaced repetition" },
+              ].map((feature, i) => (
+                <div
+                  key={feature.title}
+                  className="p-5 rounded-xl bg-white border border-[#e8e4dd] hover:border-[#c45c3e]/30 hover:shadow-md transition-all duration-300"
+                >
+                  <h3 className="font-medium text-[#2d2a26] mb-1">{feature.title}</h3>
+                  <p className="text-sm text-[#9a9590]">{feature.desc}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <p className="text-sm text-[#9a9a9a]">
-            Built with care for language learners everywhere.
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      <section className="py-24 px-6">
+        <div className="max-w-3xl mx-auto text-center">
+          <div className="inline-block mb-8">
+            <div className="w-16 h-16 rounded-2xl bg-[#c45c3e]/10 flex items-center justify-center mx-auto">
+              <BookOpen className="w-7 h-7 text-[#c45c3e]" />
+            </div>
+          </div>
+
+          <h2 className="font-serif text-4xl lg:text-5xl text-[#2d2a26] mb-6 leading-tight">
+            Your next article is waiting
+          </h2>
+          <p className="text-lg text-[#6b6560] mb-10 max-w-xl mx-auto">
+            Start reading in German, Spanish, or French today.
+            Paste your first article and see how natural language learning can be.
+          </p>
+
+          <Link
+            href="/sign-up"
+            className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-[#2d2a26] text-base font-medium text-white hover:bg-[#1a1816] transition-all shadow-md hover:shadow-lg group"
+          >
+            Get started free
+            <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+          </Link>
+
+          <p className="mt-6 text-sm text-[#9a9590]">
+            Free forever for core features
+          </p>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t border-[#e8e4dd] py-10 px-6 bg-[#faf8f5]">
+        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#c45c3e] flex items-center justify-center">
+              <span className="font-serif text-sm font-bold text-white">V</span>
+            </div>
+            <span className="font-medium text-[#2d2a26]">Vakya</span>
+          </div>
+          <p className="text-sm text-[#9a9590]">
+            Made for language lovers, by language lovers
           </p>
         </div>
       </footer>
