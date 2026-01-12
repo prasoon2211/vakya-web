@@ -561,15 +561,21 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
               {article.wordCount || 0} words
             </span>
           )}
-          <a
-            href={article.sourceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-sm text-[#6b6b6b] hover:text-[#c45c3e] transition-colors"
-          >
-            {extractDomain(article.sourceUrl)}
-            <ExternalLink className="h-3 w-3" />
-          </a>
+          {article.sourceUrl ? (
+            <a
+              href={article.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-sm text-[#6b6b6b] hover:text-[#c45c3e] transition-colors"
+            >
+              {extractDomain(article.sourceUrl)}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          ) : (
+            <span className="text-sm text-[#6b6b6b]">
+              {article.pdfUrl ? "PDF" : "Text"}
+            </span>
+          )}
         </div>
 
         {/* Instructions - hidden on mobile to save space */}

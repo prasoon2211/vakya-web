@@ -40,5 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Dictionary source files (downloaded, not needed in repo)
-lib/dictionary/*.txt
+# Dictionary SQLite databases (downloaded from R2 at runtime)
+lib/dictionary/*.db
+lib/dictionary/*.db-wal
+lib/dictionary/*.db-shm

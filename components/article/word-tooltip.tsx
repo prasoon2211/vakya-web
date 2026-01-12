@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Loader2, Sparkles, BookmarkPlus, Check, Volume2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Loader2, Sparkles, Bookmark, Check } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -20,8 +19,6 @@ interface DictionaryResult {
   partOfSpeech?: string;
   article?: string;
   gender?: string;
-  phonetic?: string;
-  audioUrl?: string;
   definition?: string;
   example?: string;
   synonyms?: string[];
@@ -44,7 +41,8 @@ export function WordTooltip({
   targetLanguage,
   articleId,
 }: WordTooltipProps) {
-  const [dictionaryResult, setDictionaryResult] = useState<DictionaryResult | null>(null);
+  const [dictionaryResult, setDictionaryResult] =
+    useState<DictionaryResult | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [isLoadingDict, setIsLoadingDict] = useState(true);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
@@ -54,7 +52,9 @@ export function WordTooltip({
   const fetchDictionary = useCallback(async () => {
     try {
       const res = await fetch(
-        `/api/word/lookup?word=${encodeURIComponent(word)}&language=${encodeURIComponent(targetLanguage)}`
+        `/api/word/lookup?word=${encodeURIComponent(
+          word
+        )}&language=${encodeURIComponent(targetLanguage)}`
       );
       const data = await res.json();
       setDictionaryResult(data);
@@ -108,7 +108,10 @@ export function WordTooltip({
         body: JSON.stringify({
           word,
           contextSentence,
-          translation: aiAnalysis?.translation || dictionaryResult?.translation || dictionaryResult?.definition,
+          translation:
+            aiAnalysis?.translation ||
+            dictionaryResult?.translation ||
+            dictionaryResult?.definition,
           partOfSpeech: aiAnalysis?.pos || dictionaryResult?.partOfSpeech,
           article: aiAnalysis?.article || dictionaryResult?.article,
           example: aiAnalysis?.example || dictionaryResult?.example,
@@ -134,24 +137,21 @@ export function WordTooltip({
       setIsSaved(true);
       toast({
         title: "Word saved!",
-        description: fetchDetails && !aiAnalysis ? "Details will be fetched in the background" : "Added to your vocabulary",
+        description:
+          fetchDetails && !aiAnalysis
+            ? "Details will be fetched in the background"
+            : "Added to your vocabulary",
         variant: "success",
       });
     } catch (error) {
       toast({
         title: "Failed to save word",
-        description: error instanceof Error ? error.message : "Please try again",
+        description:
+          error instanceof Error ? error.message : "Please try again",
         variant: "error",
       });
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const playAudio = () => {
-    if (dictionaryResult?.audioUrl) {
-      const audio = new Audio(dictionaryResult.audioUrl);
-      audio.play();
     }
   };
 
@@ -162,162 +162,136 @@ export function WordTooltip({
   const definition = dictionaryResult?.definition;
   const example = aiAnalysis?.example || dictionaryResult?.example;
   const explanation = aiAnalysis?.explanation;
-  const phonetic = dictionaryResult?.phonetic;
-  const audioUrl = dictionaryResult?.audioUrl;
 
   return (
     <div className="w-full">
       {/* Loading state */}
       {isLoadingDict && (
-        <div className="flex flex-col items-center justify-center py-8 md:py-4">
-          <div className="relative">
-            <div className="w-10 h-10 md:w-8 md:h-8 rounded-full border-2 border-[#e8dfd3]" />
-            <div className="absolute inset-0 w-10 h-10 md:w-8 md:h-8 rounded-full border-2 border-[#c45c3e] border-t-transparent animate-spin" />
-          </div>
-          <p className="mt-3 md:mt-2 text-sm md:text-xs text-[#9a9a9a]">Looking up word...</p>
+        <div className="flex items-center justify-center gap-2 py-6 md:py-4">
+          <Loader2 className="h-4 w-4 text-[#c45c3e] animate-spin" />
+          <span className="text-sm text-[#6b6b6b]">Looking up...</span>
         </div>
       )}
 
       {/* Main content */}
       {!isLoadingDict && dictionaryResult && (
-        <div className="space-y-4 md:space-y-3">
-          {/* Word header section */}
-          <div className="text-center pb-3 md:pb-2 border-b border-[#f3ede4]">
-            {/* Article + Word */}
-            <div className="flex items-baseline justify-center gap-2">
+        <div className="space-y-3 md:space-y-2.5">
+          {/* Word header - more compact, left-aligned feel with centered content */}
+          <div className="space-y-1">
+            {/* Word with article and POS inline */}
+            <div className="flex items-baseline justify-center gap-2 flex-wrap">
               {article && (
-                <span className="text-[#c45c3e] text-lg md:text-base font-medium">{article}</span>
+                <span className="text-[#c45c3e] text-base md:text-sm font-medium">
+                  {article}
+                </span>
               )}
-              <h2 className="text-3xl md:text-2xl font-semibold text-[#1a1a1a] tracking-tight">
+              <h2 className="text-2xl md:text-xl font-semibold text-[#1a1a1a]">
                 {word}
               </h2>
-            </div>
-
-            {/* Phonetic + Audio */}
-            <div className="flex items-center justify-center gap-2 mt-1.5">
-              {phonetic && (
-                <span className="text-[#9a9a9a] text-sm md:text-xs">{phonetic}</span>
-              )}
-              {audioUrl && (
-                <button
-                  onClick={playAudio}
-                  className="p-1.5 md:p-1 rounded-full hover:bg-[#f3ede4] transition-colors group"
-                >
-                  <Volume2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-[#9a9a9a] group-hover:text-[#c45c3e] transition-colors" />
-                </button>
-              )}
-            </div>
-
-            {/* Part of speech pill */}
-            {partOfSpeech && (
-              <div className="mt-2 md:mt-1.5">
-                <span className="inline-block px-2.5 md:px-2 py-0.5 text-xs md:text-[10px] font-medium text-[#6b6b6b] bg-[#f3ede4] rounded-full">
+              {partOfSpeech && (
+                <span className="text-xs text-[#9a9a9a] font-medium">
                   {partOfSpeech}
                 </span>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
-          {/* Translation - the hero section */}
+          {/* Translation/Definition - clean and prominent */}
           {(translation || definition) && (
-            <div className="bg-gradient-to-br from-[#faf8f5] to-[#f3ede4] rounded-xl md:rounded-lg p-4 md:p-3">
-              <p className="text-[#1a1a1a] text-lg md:text-base font-medium leading-relaxed">
-                {translation || definition}
-              </p>
-            </div>
+            <p className="text-[#1a1a1a] text-base md:text-sm leading-relaxed text-center">
+              {translation || definition}
+            </p>
           )}
 
           {/* Not found state */}
           {!dictionaryResult.found && !translation && !definition && (
-            <div className="text-center py-4">
-              <p className="text-[#9a9a9a]">
-                {dictionaryResult.message || "No dictionary entry found"}
-              </p>
-            </div>
+            <p className="text-[#9a9a9a] text-sm text-center py-2">
+              {dictionaryResult.message || "No dictionary entry found"}
+            </p>
           )}
 
-          {/* Example */}
+          {/* Example - subtle styling */}
           {example && (
-            <div className="relative pl-3 md:pl-2.5">
-              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-[#c45c3e] to-[#c45c3e]/30 rounded-full" />
-              <p className="text-[#4a4a4a] text-base md:text-sm italic leading-relaxed">
-                &ldquo;{example}&rdquo;
-              </p>
-            </div>
+            <p className="text-[#6b6b6b] text-sm md:text-xs italic text-center border-t border-[#f3ede4] pt-2.5 md:pt-2">
+              "{example}"
+            </p>
           )}
 
-          {/* AI Explanation */}
+          {/* AI Explanation - compact card */}
           {explanation && (
-            <div className="bg-[#faf8f5] rounded-xl md:rounded-lg p-3 md:p-2.5 border border-[#f3ede4]">
-              <div className="flex items-center gap-1.5 mb-1.5 md:mb-1">
-                <Sparkles className="h-3.5 w-3.5 md:h-3 md:w-3 text-[#c45c3e]" />
-                <span className="text-xs md:text-[10px] font-medium text-[#9a9a9a] uppercase tracking-wide">
-                  Note
-                </span>
+            <div className="bg-[#faf8f5] rounded-lg p-2.5 md:p-2 border border-[#f3ede4]">
+              <div className="flex items-start gap-2">
+                <Sparkles className="h-3.5 w-3.5 text-[#c45c3e] mt-0.5 shrink-0" />
+                <p className="text-xs text-[#4a4a4a] leading-relaxed">
+                  {explanation}
+                </p>
               </div>
-              <p className="text-sm md:text-xs text-[#4a4a4a] leading-relaxed">
-                {explanation}
-              </p>
             </div>
           )}
 
-          {/* Action buttons - compact on desktop, larger on mobile */}
-          <div className="flex gap-2 md:gap-2 pt-2 pb-8 md:pb-2">
+          {/* Divider */}
+          <div className="border-t border-[#f3ede4]" />
+
+          {/* Action row - cleaner, more integrated */}
+          <div className="flex items-center justify-between pt-1 pb-6 md:pb-1">
+            {/* Left: More details link */}
             {!aiAnalysis && (
               <button
                 onClick={handleAnalyzeWithAI}
                 disabled={isLoadingAI}
                 className={cn(
-                  "flex-1 flex items-center justify-center gap-1.5 md:gap-1.5",
-                  "py-3 md:py-2 px-3 md:px-3 rounded-xl md:rounded-lg",
-                  "text-sm md:text-xs font-medium transition-all duration-200",
-                  "border border-[#e8dfd3] text-[#6b6b6b]",
-                  "hover:border-[#c45c3e]/30 hover:text-[#c45c3e] hover:bg-[#c45c3e]/5",
+                  "flex items-center gap-1.5 text-sm md:text-xs font-medium",
+                  "text-[#6b6b6b] hover:text-[#c45c3e] transition-colors",
                   "disabled:opacity-50 disabled:cursor-not-allowed"
                 )}
               >
                 {isLoadingAI ? (
                   <>
-                    <Loader2 className="h-4 w-4 md:h-3.5 md:w-3.5 animate-spin" />
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     <span>Analyzing...</span>
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4 md:h-3.5 md:w-3.5" />
-                    <span>{dictionaryResult.found ? "More details" : "AI Analysis"}</span>
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>
+                      {dictionaryResult.found ? "More details" : "AI lookup"}
+                    </span>
                   </>
                 )}
               </button>
             )}
 
+            {/* Spacer when no AI button */}
+            {aiAnalysis && <div />}
+
+            {/* Right: Save button */}
             <button
               onClick={() => handleSaveWord(!aiAnalysis)}
               disabled={isSaved || isSaving}
               className={cn(
-                "flex items-center justify-center gap-1.5 md:gap-1.5",
-                "py-3 md:py-2 px-5 md:px-3 rounded-xl md:rounded-lg",
+                "flex items-center gap-1.5",
+                "py-1.5 md:py-1 px-3 md:px-2.5 rounded-full",
                 "text-sm md:text-xs font-medium transition-all duration-200",
-                aiAnalysis ? "flex-1" : "",
                 isSaved
-                  ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
-                  : "bg-[#c45c3e] text-white shadow-md md:shadow-sm shadow-[#c45c3e]/20 hover:bg-[#b35537] active:scale-[0.98]",
+                  ? "bg-emerald-50 text-emerald-600"
+                  : "bg-[#c45c3e] text-white hover:bg-[#b35537] active:scale-[0.97]",
                 "disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
               )}
             >
               {isSaved ? (
                 <>
-                  <Check className="h-4 w-4 md:h-3.5 md:w-3.5" />
+                  <Check className="h-3.5 w-3.5" />
                   <span>Saved</span>
                 </>
               ) : isSaving ? (
                 <>
-                  <Loader2 className="h-4 w-4 md:h-3.5 md:w-3.5 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   <span>Saving...</span>
                 </>
               ) : (
                 <>
-                  <BookmarkPlus className="h-4 w-4 md:h-3.5 md:w-3.5" />
-                  <span>Save word</span>
+                  <Bookmark className="h-3.5 w-3.5" />
+                  <span>Save</span>
                 </>
               )}
             </button>

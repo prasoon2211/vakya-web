@@ -705,7 +705,93 @@ async function processTranslation(
   }
 }
 
+// Background translation for text input (simpler - no fetching needed)
+async function processTextTranslation(
+  articleId: string,
+  paragraphs: string[],
+  targetLanguage: string,
+  cefrLevel: string
+) {
+  const translatedBlocks: TranslationBlock[] = [];
+
+  try {
+    const MAX_PARALLEL = 15;
+
+    console.log(`[${articleId}] Starting text translation: ${paragraphs.length} chunks`);
+
+    // Process chunks in parallel waves
+    for (let i = 0; i < paragraphs.length; i += MAX_PARALLEL) {
+      const wave = paragraphs.slice(i, i + MAX_PARALLEL);
+
+      console.log(`[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, paragraphs.length)} of ${paragraphs.length}`);
+
+      const results = await Promise.allSettled(
+        wave.map((chunk) => translateBatch([chunk], targetLanguage, cefrLevel))
+      );
+
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j];
+        const originalChunk = wave[j];
+
+        if (result.status === "fulfilled" && result.value.length > 0) {
+          const block = result.value[0];
+          if (block.translated && block.translated.trim().length > 0) {
+            translatedBlocks.push(block);
+          }
+        } else {
+          translatedBlocks.push({
+            original: originalChunk,
+            translated: originalChunk,
+          });
+        }
+      }
+
+      // Save progress after each wave
+      await db
+        .update(articles)
+        .set({
+          translatedContent: JSON.stringify(translatedBlocks),
+          translationProgress: translatedBlocks.length,
+        })
+        .where(eq(articles.id, articleId));
+
+      console.log(`[${articleId}] Progress: ${translatedBlocks.length}/${paragraphs.length}`);
+    }
+
+    // Calculate word count and mark complete
+    const wordCount = translatedBlocks.reduce((acc, block) => {
+      return acc + (block.translated?.split(/\s+/).length || 0);
+    }, 0);
+
+    await db
+      .update(articles)
+      .set({
+        translatedContent: JSON.stringify(translatedBlocks),
+        status: "completed",
+        wordCount,
+        translationProgress: paragraphs.length,
+      })
+      .where(eq(articles.id, articleId));
+
+    console.log(`[${articleId}] Text translation completed! ${wordCount} words`);
+
+  } catch (error) {
+    console.error(`[${articleId}] Text translation error:`, error);
+
+    await db
+      .update(articles)
+      .set({
+        translatedContent: translatedBlocks.length > 0 ? JSON.stringify(translatedBlocks) : null,
+        translationProgress: translatedBlocks.length,
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : "Translation failed",
+      })
+      .where(eq(articles.id, articleId));
+  }
+}
+
 // POST - Start or resume article translation
+// Supports: URL (default), text input
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
@@ -714,11 +800,26 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { url, targetLanguage, cefrLevel } = body;
+    const { type = "url", url, text, title, targetLanguage, cefrLevel } = body;
 
-    if (!url || !targetLanguage || !cefrLevel) {
+    // Validate based on input type
+    if (type === "url") {
+      if (!url || !targetLanguage || !cefrLevel) {
+        return NextResponse.json(
+          { error: "Missing required fields" },
+          { status: 400 }
+        );
+      }
+    } else if (type === "text") {
+      if (!text || !title || !targetLanguage || !cefrLevel) {
+        return NextResponse.json(
+          { error: "Missing required fields: text, title, targetLanguage, cefrLevel" },
+          { status: 400 }
+        );
+      }
+    } else {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Invalid type. Use 'url' or 'text'" },
         { status: 400 }
       );
     }
@@ -737,6 +838,52 @@ export async function POST(request: Request) {
       user = newUser;
     }
 
+    // Handle text input differently - no deduplication needed, always create new
+    if (type === "text") {
+      // Create new article directly with content
+      const paragraphs = smartChunkContent(text);
+
+      // Detect source language
+      const sourceLanguage = await detectLanguage(text.slice(0, 500));
+
+      const [newArticle] = await db
+        .insert(articles)
+        .values({
+          userId: user.id,
+          sourceType: "text",
+          sourceUrl: null,
+          title: title,
+          originalContent: JSON.stringify(paragraphs),
+          sourceLanguage,
+          targetLanguage,
+          cefrLevel,
+          status: "translating",
+          totalParagraphs: paragraphs.length,
+          translationProgress: 0,
+        })
+        .returning({ id: articles.id });
+
+      const articleId = newArticle.id;
+
+      // Start translation in background
+      processTextTranslation(
+        articleId,
+        paragraphs,
+        targetLanguage,
+        cefrLevel
+      ).catch((error) => {
+        console.error(`[${articleId}] Background processing error:`, error);
+      });
+
+      return NextResponse.json({
+        articleId,
+        status: "translating",
+        progress: 0,
+        total: paragraphs.length,
+      });
+    }
+
+    // URL handling (existing logic)
     // Check if article already exists
     const existingArticle = await db.query.articles.findFirst({
       where: and(
@@ -787,6 +934,7 @@ export async function POST(request: Request) {
         .insert(articles)
         .values({
           userId: user.id,
+          sourceType: "url",
           sourceUrl: url,
           targetLanguage,
           cefrLevel,

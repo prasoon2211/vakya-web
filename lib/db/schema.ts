@@ -26,7 +26,9 @@ export const articles = pgTable(
     userId: uuid("user_id")
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
-    sourceUrl: text("source_url").notNull(),
+    sourceType: text("source_type").default("url").notNull(), // 'url' | 'text' | 'pdf'
+    sourceUrl: text("source_url"), // nullable for text input
+    pdfUrl: text("pdf_url"), // R2 key for stored PDF files
     title: text("title"),
     originalContent: text("original_content"),
     translatedContent: text("translated_content"),
@@ -47,12 +49,6 @@ export const articles = pgTable(
   (table) => [
     index("idx_articles_user_id").on(table.userId),
     index("idx_articles_created_at").on(table.createdAt),
-    unique("articles_user_url_lang_level").on(
-      table.userId,
-      table.sourceUrl,
-      table.targetLanguage,
-      table.cefrLevel
-    ),
   ]
 );
 
@@ -138,3 +134,7 @@ export const LANGUAGES = [
 ] as const;
 
 export type TargetLanguage = typeof LANGUAGES[number];
+
+// Source types for articles
+export const SOURCE_TYPES = ["url", "text", "pdf"] as const;
+export type SourceType = typeof SOURCE_TYPES[number];

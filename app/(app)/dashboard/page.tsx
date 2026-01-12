@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Globe, Headphones, Loader2, Sparkles, ArrowRight, BookOpen, ExternalLink, RefreshCw, AlertCircle, Trash2, MoreVertical } from "lucide-react";
+import { Globe, Headphones, Loader2, Sparkles, BookOpen, ExternalLink, RefreshCw, AlertCircle, Trash2, MoreVertical, FileText, Upload, Link2, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -24,7 +24,9 @@ import {
 import { toast } from "@/components/ui/use-toast";
 import { LANGUAGES, CEFR_LEVELS, type Article } from "@/lib/db/schema";
 import { formatRelativeTime, extractDomain } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
+type InputTab = "url" | "text" | "pdf";
 type TranslationStatus = "idle" | "fetching" | "translating" | "completed" | "failed";
 
 interface TranslationState {
@@ -38,7 +40,19 @@ interface TranslationState {
 
 export default function DashboardPage() {
   const router = useRouter();
+  // Tab state
+  const [activeTab, setActiveTab] = useState<InputTab>("url");
+  // URL input
   const [url, setUrl] = useState("");
+  // Text input
+  const [textTitle, setTextTitle] = useState("");
+  const [textContent, setTextContent] = useState("");
+  // PDF input
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfTitle, setPdfTitle] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Common settings
   const [targetLanguage, setTargetLanguage] = useState("German");
   const [cefrLevel, setCefrLevel] = useState("B1");
   const [translationState, setTranslationState] = useState<TranslationState>({ status: "idle" });
@@ -136,31 +150,78 @@ export default function DashboardPage() {
   }, [router]);
 
   const handleTranslate = async () => {
-    if (!url.trim()) {
-      toast({ title: "Please enter a URL", variant: "error" });
-      return;
-    }
-
-    try {
-      new URL(url);
-    } catch {
-      toast({ title: "Please enter a valid URL", variant: "error" });
-      return;
+    // Validate based on active tab
+    if (activeTab === "url") {
+      if (!url.trim()) {
+        toast({ title: "Please enter a URL", variant: "error" });
+        return;
+      }
+      try {
+        new URL(url);
+      } catch {
+        toast({ title: "Please enter a valid URL", variant: "error" });
+        return;
+      }
+    } else if (activeTab === "text") {
+      if (!textTitle.trim()) {
+        toast({ title: "Please enter a title", variant: "error" });
+        return;
+      }
+      if (!textContent.trim() || textContent.trim().length < 50) {
+        toast({ title: "Please enter at least 50 characters of text", variant: "error" });
+        return;
+      }
+    } else if (activeTab === "pdf") {
+      if (!pdfFile) {
+        toast({ title: "Please select a PDF file", variant: "error" });
+        return;
+      }
     }
 
     // Show immediate feedback
     setTranslationState({ status: "fetching" });
 
     try {
-      const res = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: url.trim(),
-          targetLanguage,
-          cefrLevel,
-        }),
-      });
+      let res: Response;
+
+      if (activeTab === "url") {
+        res = await fetch("/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "url",
+            url: url.trim(),
+            targetLanguage,
+            cefrLevel,
+          }),
+        });
+      } else if (activeTab === "text") {
+        res = await fetch("/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "text",
+            text: textContent.trim(),
+            title: textTitle.trim(),
+            targetLanguage,
+            cefrLevel,
+          }),
+        });
+      } else {
+        // PDF upload
+        const formData = new FormData();
+        formData.append("file", pdfFile!);
+        formData.append("targetLanguage", targetLanguage);
+        formData.append("cefrLevel", cefrLevel);
+        if (pdfTitle.trim()) {
+          formData.append("title", pdfTitle.trim());
+        }
+
+        res = await fetch("/api/translate/pdf", {
+          method: "POST",
+          body: formData,
+        });
+      }
 
       const data = await res.json();
 
@@ -185,17 +246,17 @@ export default function DashboardPage() {
 
       // Translation started - update state and start polling immediately
       setTranslationState({
-        status: data.status || "fetching",
+        status: data.status || "translating",
         articleId: data.articleId,
         progress: data.progress || 0,
         total: data.total || 0,
+        title: data.title,
       });
 
       // Start polling for status immediately
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
       }
-      // Poll more frequently (every 1 second) for better UX
       pollingRef.current = setInterval(() => pollStatus(data.articleId), 1000);
 
     } catch (error) {
@@ -203,6 +264,43 @@ export default function DashboardPage() {
         status: "failed",
         error: error instanceof Error ? error.message : "Translation failed",
       });
+    }
+  };
+
+  // PDF drag and drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === "application/pdf") {
+      setPdfFile(file);
+    } else {
+      toast({ title: "Please drop a PDF file", variant: "error" });
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPdfFile(file);
+    }
+  };
+
+  const clearPdfFile = () => {
+    setPdfFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
@@ -252,6 +350,8 @@ export default function DashboardPage() {
   const getStatusMessage = () => {
     switch (translationState.status) {
       case "fetching":
+        if (activeTab === "pdf") return "Processing PDF...";
+        if (activeTab === "text") return "Preparing text...";
         return "Fetching article content...";
       case "translating":
         if (translationState.total && translationState.total > 0) {
@@ -259,7 +359,6 @@ export default function DashboardPage() {
           const percent = Math.round((progress / translationState.total) * 100);
           return `Translating... ${percent}% (${progress}/${translationState.total} chunks)`;
         }
-        // Still preparing (content fetched but total not known yet, or just started)
         return "Preparing translation...";
       case "failed":
         return translationState.error || "Translation failed";
@@ -273,6 +372,8 @@ export default function DashboardPage() {
       return translationState.title;
     }
     if (translationState.status === "fetching") {
+      if (activeTab === "pdf") return "Extracting text from PDF...";
+      if (activeTab === "text") return "Processing your text...";
       return "Extracting main content from the page...";
     }
     if (translationState.status === "translating") {
@@ -281,43 +382,195 @@ export default function DashboardPage() {
     return null;
   };
 
+  // Check if current tab input is valid
+  const isInputValid = () => {
+    if (activeTab === "url") return url.trim().length > 0;
+    if (activeTab === "text") return textTitle.trim().length > 0 && textContent.trim().length >= 50;
+    if (activeTab === "pdf") return pdfFile !== null;
+    return false;
+  };
+
   const isTranslating = translationState.status === "fetching" || translationState.status === "translating";
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
       {/* Quick Translate Section - Mobile: Clean and flat, Desktop: Card with decorations */}
       <section className="mb-10 sm:mb-16 opacity-0 animate-fade-up" style={{ animationDelay: '0.1s', animationFillMode: 'forwards' }}>
-        {/* Desktop: Card wrapper */}
-        <div className="hidden sm:block relative rounded-2xl border border-[#e8dfd3] bg-white p-8 shadow-sm overflow-hidden">
+        {/* Desktop: Card wrapper with tabs */}
+        <div className="hidden sm:block relative rounded-2xl border border-[#e8dfd3] bg-white shadow-sm overflow-hidden">
           {/* Decorative corner accent */}
           <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-[#c45c3e]/5 to-transparent pointer-events-none" />
           <div className="absolute -top-8 -right-8 w-24 h-24 border border-[#c45c3e]/10 rounded-full pointer-events-none" />
           <div className="absolute -top-4 -right-4 w-12 h-12 border border-[#c45c3e]/10 rounded-full pointer-events-none" />
 
           <div className="relative">
-            <div className="flex items-center gap-4 mb-6">
+            {/* Header */}
+            <div className="flex items-center gap-4 p-8 pb-4">
               <div className="w-12 h-12 rounded-xl bg-[#c45c3e]/10 flex items-center justify-center">
                 <Globe className="w-6 h-6 text-[#c45c3e]" />
               </div>
               <div>
                 <h2 className="font-serif text-2xl font-bold text-[#1a1a1a]">
-                  Translate an Article
+                  Start Learning
                 </h2>
                 <p className="text-[#6b6b6b] text-sm">
-                  Paste any article URL and transform it into a personalized lesson
+                  Transform any content into a personalized lesson
                 </p>
               </div>
             </div>
 
-            <div className="space-y-4">
-              <Input
-                placeholder="Paste an article URL..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                disabled={isTranslating}
-                className="h-14 text-base"
-              />
+            {/* Tabs */}
+            <div className="px-8">
+              <div className="flex gap-1 p-1 bg-[#f3ede4] rounded-xl">
+                <button
+                  onClick={() => setActiveTab("url")}
+                  disabled={isTranslating}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
+                    activeTab === "url"
+                      ? "bg-white text-[#1a1a1a] shadow-sm"
+                      : "text-[#6b6b6b] hover:text-[#3d3d3d]",
+                    isTranslating && "opacity-50 cursor-not-allowed"
+                  )}
+                >
+                  <Link2 className="w-4 h-4" />
+                  URL
+                </button>
+                <button
+                  onClick={() => setActiveTab("text")}
+                  disabled={isTranslating}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
+                    activeTab === "text"
+                      ? "bg-white text-[#1a1a1a] shadow-sm"
+                      : "text-[#6b6b6b] hover:text-[#3d3d3d]",
+                    isTranslating && "opacity-50 cursor-not-allowed"
+                  )}
+                >
+                  <Type className="w-4 h-4" />
+                  Text
+                </button>
+                <button
+                  onClick={() => setActiveTab("pdf")}
+                  disabled={isTranslating}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
+                    activeTab === "pdf"
+                      ? "bg-white text-[#1a1a1a] shadow-sm"
+                      : "text-[#6b6b6b] hover:text-[#3d3d3d]",
+                    isTranslating && "opacity-50 cursor-not-allowed"
+                  )}
+                >
+                  <FileText className="w-4 h-4" />
+                  PDF
+                </button>
+              </div>
+            </div>
 
+            {/* Tab Content */}
+            <div className="p-8 pt-6 space-y-4">
+              {/* URL Tab */}
+              {activeTab === "url" && (
+                <Input
+                  placeholder="Paste an article URL..."
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  disabled={isTranslating}
+                  className="h-14 text-base"
+                />
+              )}
+
+              {/* Text Tab */}
+              {activeTab === "text" && (
+                <div className="space-y-3">
+                  <Input
+                    placeholder="Title for your text..."
+                    value={textTitle}
+                    onChange={(e) => setTextTitle(e.target.value)}
+                    disabled={isTranslating}
+                    className="h-12"
+                  />
+                  <textarea
+                    placeholder="Paste or type your text here (at least 50 characters)..."
+                    value={textContent}
+                    onChange={(e) => setTextContent(e.target.value)}
+                    disabled={isTranslating}
+                    className="w-full h-40 px-4 py-3 text-base rounded-xl border border-[#e8dfd3] bg-white placeholder:text-[#9a9a9a] focus:outline-none focus:ring-2 focus:ring-[#c45c3e]/20 focus:border-[#c45c3e] disabled:opacity-50 resize-none"
+                  />
+                  <p className="text-xs text-[#9a9a9a]">
+                    {textContent.length} characters {textContent.length < 50 && textContent.length > 0 && `(${50 - textContent.length} more needed)`}
+                  </p>
+                </div>
+              )}
+
+              {/* PDF Tab */}
+              {activeTab === "pdf" && (
+                <div className="space-y-3">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  {!pdfFile ? (
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={() => !isTranslating && fileInputRef.current?.click()}
+                      className={cn(
+                        "relative h-40 rounded-xl border-2 border-dashed transition-all cursor-pointer",
+                        "flex flex-col items-center justify-center gap-3",
+                        isDragging
+                          ? "border-[#c45c3e] bg-[#c45c3e]/5"
+                          : "border-[#e8dfd3] hover:border-[#c45c3e]/50 hover:bg-[#faf8f5]",
+                        isTranslating && "opacity-50 cursor-not-allowed"
+                      )}
+                    >
+                      <div className="w-12 h-12 rounded-full bg-[#f3ede4] flex items-center justify-center">
+                        <Upload className="w-5 h-5 text-[#6b6b6b]" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-[#3d3d3d]">
+                          Drop your PDF here or click to browse
+                        </p>
+                        <p className="text-xs text-[#9a9a9a] mt-1">
+                          Maximum file size: 10MB
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-40 rounded-xl border border-[#e8dfd3] bg-[#faf8f5] flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="w-12 h-12 rounded-full bg-[#c45c3e]/10 flex items-center justify-center mx-auto mb-3">
+                          <FileText className="w-5 h-5 text-[#c45c3e]" />
+                        </div>
+                        <p className="text-sm font-medium text-[#1a1a1a] mb-1">{pdfFile.name}</p>
+                        <p className="text-xs text-[#9a9a9a] mb-3">
+                          {(pdfFile.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); clearPdfFile(); }}
+                          disabled={isTranslating}
+                          className="text-xs text-[#c45c3e] hover:underline disabled:opacity-50"
+                        >
+                          Remove file
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <Input
+                    placeholder="Custom title (optional)"
+                    value={pdfTitle}
+                    onChange={(e) => setPdfTitle(e.target.value)}
+                    disabled={isTranslating}
+                    className="h-12"
+                  />
+                </div>
+              )}
+
+              {/* Language & Level Selectors */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[#3d3d3d] mb-2">
@@ -356,6 +609,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {/* Status / Actions */}
               {translationState.status === "failed" ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700">
@@ -409,29 +663,138 @@ export default function DashboardPage() {
               ) : (
                 <Button
                   onClick={handleTranslate}
-                  disabled={!url.trim()}
+                  disabled={!isInputValid()}
                   className="w-full h-14 text-base"
                 >
                   <Sparkles className="w-4 h-4 mr-2" />
-                  Translate Article
+                  {activeTab === "url" && "Translate Article"}
+                  {activeTab === "text" && "Translate Text"}
+                  {activeTab === "pdf" && "Translate PDF"}
                 </Button>
               )}
             </div>
           </div>
         </div>
 
-        {/* Mobile: Clean, flat design with clear section */}
+        {/* Mobile: Clean, flat design with tabs */}
         <div className="sm:hidden">
           <div className="bg-white rounded-2xl p-4 border border-[#e8dfd3] space-y-3">
-            <p className="text-sm font-medium text-[#6b6b6b]">Translate an article</p>
+            {/* Mobile Tabs */}
+            <div className="flex gap-1 p-1 bg-[#f3ede4] rounded-xl">
+              <button
+                onClick={() => setActiveTab("url")}
+                disabled={isTranslating}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",
+                  activeTab === "url"
+                    ? "bg-white text-[#1a1a1a] shadow-sm"
+                    : "text-[#6b6b6b]",
+                  isTranslating && "opacity-50"
+                )}
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                URL
+              </button>
+              <button
+                onClick={() => setActiveTab("text")}
+                disabled={isTranslating}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",
+                  activeTab === "text"
+                    ? "bg-white text-[#1a1a1a] shadow-sm"
+                    : "text-[#6b6b6b]",
+                  isTranslating && "opacity-50"
+                )}
+              >
+                <Type className="w-3.5 h-3.5" />
+                Text
+              </button>
+              <button
+                onClick={() => setActiveTab("pdf")}
+                disabled={isTranslating}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",
+                  activeTab === "pdf"
+                    ? "bg-white text-[#1a1a1a] shadow-sm"
+                    : "text-[#6b6b6b]",
+                  isTranslating && "opacity-50"
+                )}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                PDF
+              </button>
+            </div>
 
-            <Input
-              placeholder="Paste a URL..."
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              disabled={isTranslating}
-              className="h-12 text-base border-[#e8dfd3]"
-            />
+            {/* Mobile Tab Content */}
+            {activeTab === "url" && (
+              <Input
+                placeholder="Paste a URL..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                disabled={isTranslating}
+                className="h-12 text-base border-[#e8dfd3]"
+              />
+            )}
+
+            {activeTab === "text" && (
+              <div className="space-y-2">
+                <Input
+                  placeholder="Title..."
+                  value={textTitle}
+                  onChange={(e) => setTextTitle(e.target.value)}
+                  disabled={isTranslating}
+                  className="h-11 border-[#e8dfd3]"
+                />
+                <textarea
+                  placeholder="Paste or type text here..."
+                  value={textContent}
+                  onChange={(e) => setTextContent(e.target.value)}
+                  disabled={isTranslating}
+                  className="w-full h-32 px-3 py-2.5 text-sm rounded-xl border border-[#e8dfd3] bg-white placeholder:text-[#9a9a9a] focus:outline-none focus:ring-2 focus:ring-[#c45c3e]/20 focus:border-[#c45c3e] disabled:opacity-50 resize-none"
+                />
+              </div>
+            )}
+
+            {activeTab === "pdf" && (
+              <div className="space-y-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                {!pdfFile ? (
+                  <button
+                    onClick={() => !isTranslating && fileInputRef.current?.click()}
+                    disabled={isTranslating}
+                    className={cn(
+                      "w-full h-28 rounded-xl border-2 border-dashed border-[#e8dfd3]",
+                      "flex flex-col items-center justify-center gap-2",
+                      "text-[#6b6b6b] active:bg-[#faf8f5]",
+                      isTranslating && "opacity-50"
+                    )}
+                  >
+                    <Upload className="w-5 h-5" />
+                    <span className="text-sm">Tap to select PDF</span>
+                  </button>
+                ) : (
+                  <div className="h-28 rounded-xl border border-[#e8dfd3] bg-[#faf8f5] flex items-center justify-center">
+                    <div className="text-center">
+                      <FileText className="w-6 h-6 text-[#c45c3e] mx-auto mb-1" />
+                      <p className="text-sm font-medium text-[#1a1a1a] truncate max-w-[200px]">{pdfFile.name}</p>
+                      <button
+                        onClick={clearPdfFile}
+                        disabled={isTranslating}
+                        className="text-xs text-[#c45c3e] mt-1"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex gap-3">
               <Select value={targetLanguage} onValueChange={setTargetLanguage} disabled={isTranslating}>
@@ -511,11 +874,13 @@ export default function DashboardPage() {
             ) : (
               <Button
                 onClick={handleTranslate}
-                disabled={!url.trim()}
+                disabled={!isInputValid()}
                 className="w-full h-12"
               >
                 <Sparkles className="w-4 h-4 mr-2" />
-                Translate
+                {activeTab === "url" && "Translate"}
+                {activeTab === "text" && "Translate Text"}
+                {activeTab === "pdf" && "Translate PDF"}
               </Button>
             )}
           </div>
@@ -597,8 +962,22 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="flex items-center gap-2 text-sm text-[#9a9a9a] mb-4">
-                      <ExternalLink className="w-3 h-3" />
-                      <span className="truncate">{extractDomain(article.sourceUrl)}</span>
+                      {article.sourceUrl ? (
+                        <>
+                          <ExternalLink className="w-3 h-3" />
+                          <span className="truncate">{extractDomain(article.sourceUrl)}</span>
+                        </>
+                      ) : article.pdfUrl ? (
+                        <>
+                          <FileText className="w-3 h-3" />
+                          <span>PDF</span>
+                        </>
+                      ) : (
+                        <>
+                          <Type className="w-3 h-3" />
+                          <span>Text</span>
+                        </>
+                      )}
                       <span className="flex-shrink-0">·</span>
                       <span className="flex-shrink-0">{article.wordCount || 0} words</span>
                       {article.audioUrl && (

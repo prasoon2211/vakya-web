@@ -10,6 +10,15 @@ const env = { ...process.env }
     await exec('npx next build --experimental-build-mode generate')
   }
 
+  // Download dictionary databases from R2 if not present
+  console.log('[Entrypoint] Checking dictionary databases...')
+  try {
+    await exec('node lib/dictionary/download-dictionaries.js')
+  } catch (err) {
+    // Non-fatal - app can run without dictionaries (falls back to AI)
+    console.log('[Entrypoint] Dictionary download failed, continuing anyway')
+  }
+
   // launch application
   await exec(process.argv.slice(2).join(' '))
 })()

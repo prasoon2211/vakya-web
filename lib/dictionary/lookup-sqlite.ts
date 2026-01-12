@@ -1,0 +1,395 @@
+/**
+ * SQLite-based Dictionary Lookup Module
+ *
+ * Uses Wiktionary data stored in SQLite for fast, accurate lookups.
+ * Supports German, Spanish, and French with 1.4M+ entries total.
+ * Each language has its own database file for easier management.
+ *
+ * Features:
+ * - Instant lookups via indexed queries
+ * - Minimal memory footprint
+ * - Conjugated forms and inflections included
+ * - IPA pronunciation and audio links
+ */
+
+import Database from 'better-sqlite3';
+import * as path from 'path';
+import * as fs from 'fs';
+
+export type SupportedLanguage = 'German' | 'Spanish' | 'French';
+
+// Map language names to database file codes
+const LANGUAGE_CODES: Record<SupportedLanguage, string> = {
+  German: 'de',
+  Spanish: 'es',
+  French: 'fr',
+};
+
+export interface DictionaryEntry {
+  word: string;              // Original word (preserves case)
+  language: SupportedLanguage;
+  partOfSpeech: string | null;
+  definition: string | null; // Primary definition
+  definitions: string[];     // All definitions
+  forms: string | null;      // Related forms (conjugations, etc.)
+  ipa: string | null;        // IPA pronunciation
+  audioUrl: string | null;   // Wikimedia audio URL
+}
+
+// Lazy-load database connections (one per language)
+const databases: Partial<Record<SupportedLanguage, Database.Database>> = {};
+const dbErrors: Partial<Record<SupportedLanguage, Error>> = {};
+
+// Prepared statements cache (one per language)
+const lookupStmts: Partial<Record<SupportedLanguage, Database.Statement>> = {};
+const lookupByFormsStmts: Partial<Record<SupportedLanguage, Database.Statement>> = {};
+
+function getDbPath(language: SupportedLanguage): string {
+  const code = LANGUAGE_CODES[language];
+  return path.join(process.cwd(), 'lib/dictionary', `dictionary-${code}.db`);
+}
+
+function getDb(language: SupportedLanguage): Database.Database {
+  if (databases[language]) return databases[language]!;
+  if (dbErrors[language]) throw dbErrors[language];
+
+  try {
+    const dbPath = getDbPath(language);
+
+    if (!fs.existsSync(dbPath)) {
+      throw new Error(
+        `Dictionary database not found for ${language} at ${dbPath}. ` +
+        `Run 'npx tsx lib/dictionary/build-sqlite.ts' to build it.`
+      );
+    }
+
+    const db = new Database(dbPath, { readonly: true });
+    databases[language] = db;
+
+    console.log(`[Dictionary] Loaded ${language} database`);
+    return db;
+  } catch (err) {
+    dbErrors[language] = err instanceof Error ? err : new Error(`Failed to load ${language} dictionary`);
+    console.error(`[Dictionary] Failed to load ${language}:`, dbErrors[language]!.message);
+    throw dbErrors[language];
+  }
+}
+
+function getLookupStmt(language: SupportedLanguage): Database.Statement {
+  if (!lookupStmts[language]) {
+    lookupStmts[language] = getDb(language).prepare(`
+      SELECT
+        word_original as word,
+        part_of_speech as partOfSpeech,
+        definition,
+        definitions_json as definitionsJson,
+        forms,
+        ipa,
+        audio
+      FROM words
+      WHERE word_lower = ?
+      LIMIT 1
+    `);
+  }
+  return lookupStmts[language]!;
+}
+
+function getLookupByFormsStmt(language: SupportedLanguage): Database.Statement {
+  if (!lookupByFormsStmts[language]) {
+    // Filter out entries that are just references to other words
+    // We want the "real" definition, not "plural of X" etc.
+    lookupByFormsStmts[language] = getDb(language).prepare(`
+      SELECT
+        word_original as word,
+        part_of_speech as partOfSpeech,
+        definition,
+        definitions_json as definitionsJson,
+        forms,
+        ipa,
+        audio
+      FROM words
+      WHERE forms LIKE ?
+        AND definition NOT LIKE 'inflection of%'
+        AND definition NOT LIKE 'plural of%'
+        AND definition NOT LIKE 'singular of%'
+        AND definition NOT LIKE '%form of%'
+        AND definition NOT LIKE '%spelling of%'
+        AND definition NOT LIKE '%participle of%'
+        AND definition NOT LIKE 'gerund of%'
+        AND definition NOT LIKE '%person %'
+        AND definition NOT LIKE 'superlative%'
+        AND definition NOT LIKE 'comparative%'
+        AND definition NOT LIKE 'diminutive of%'
+        AND definition NOT LIKE 'augmentative of%'
+        AND definition NOT LIKE 'abbreviation of%'
+        AND definition NOT LIKE 'contraction of%'
+        AND definition NOT LIKE 'misspelling of%'
+      LIMIT 1
+    `);
+  }
+  return lookupByFormsStmts[language]!;
+}
+
+// Convert Wikimedia audio path to full URL
+function getAudioUrl(audioPath: string | null): string | null {
+  if (!audioPath) return null;
+  if (audioPath.startsWith('http')) return audioPath;
+
+  const cleanPath = audioPath.replace(/^transcoded\//, '');
+  return `https://upload.wikimedia.org/wikipedia/commons/${cleanPath}`;
+}
+
+function parseRow(row: Record<string, unknown>, language: SupportedLanguage): DictionaryEntry {
+  let definitions: string[] = [];
+  try {
+    const jsonStr = row.definitionsJson as string;
+    if (jsonStr) {
+      definitions = JSON.parse(jsonStr);
+    }
+  } catch {
+    definitions = row.definition ? [row.definition as string] : [];
+  }
+
+  return {
+    word: row.word as string,
+    language,
+    partOfSpeech: row.partOfSpeech as string | null,
+    definition: row.definition as string | null,
+    definitions,
+    forms: row.forms as string | null,
+    ipa: row.ipa as string | null,
+    audioUrl: getAudioUrl(row.audio as string | null),
+  };
+}
+
+/**
+ * Look up a word in the dictionary
+ *
+ * @param word - The word to look up
+ * @param language - The target language
+ * @returns Dictionary entry if found, null otherwise
+ */
+export function lookupWord(word: string, language: SupportedLanguage): DictionaryEntry | null {
+  try {
+    const normalizedWord = word.toLowerCase().trim();
+    if (!normalizedWord || normalizedWord.length < 1) return null;
+
+    // Direct lookup
+    const row = getLookupStmt(language).get(normalizedWord) as Record<string, unknown> | undefined;
+
+    if (row) {
+      const entry = parseRow(row, language);
+
+      // If this is just a reference to another form, try to find the base word
+      if (entry.definition && isInflectionReference(entry.definition)) {
+        const baseWord = extractBaseWord(entry.definition);
+        if (baseWord && baseWord.toLowerCase() !== normalizedWord) {
+          const baseEntry = lookupWord(baseWord, language);
+          if (baseEntry && baseEntry.definition && !isInflectionReference(baseEntry.definition)) {
+            return {
+              ...baseEntry,
+              word: entry.word,
+              definition: `${baseEntry.definition} (${entry.definition})`,
+            };
+          }
+        }
+      }
+
+      return entry;
+    }
+
+    // If not found directly, try searching in forms
+    const formRow = getLookupByFormsStmt(language).get(`%${normalizedWord}%`) as Record<string, unknown> | undefined;
+
+    if (formRow) {
+      const entry = parseRow(formRow, language);
+      return {
+        ...entry,
+        definition: entry.definition ? `${entry.definition} (from: ${entry.word})` : null,
+        word,
+      };
+    }
+
+    return null;
+  } catch (err) {
+    console.error('[Dictionary] Lookup error:', err);
+    return null;
+  }
+}
+
+function isInflectionReference(definition: string): boolean {
+  // Comprehensive list of Wiktionary "form of" patterns
+  const patterns = [
+    // Basic inflections
+    /^plural of /i,
+    /^singular of /i,
+    /^inflection of /i,
+
+    // Person/number
+    /^(first|second|third)[- ]person /i,
+
+    // Gender/number combinations
+    /^(masculine|feminine|neuter) (singular|plural)( (nominative|accusative|genitive|dative|vocative))? of /i,
+    /^(masculine|feminine|neuter) of /i,
+    /^dual of /i,
+
+    // Participles
+    /^(past|present|perfect|future|active|passive) participle of /i,
+    /^participle of /i,
+
+    // Verb tenses and moods
+    /^(infinitive|imperative|subjunctive|indicative|conditional|optative) of /i,
+    /^(future|preterite?|imperfect|perfect|pluperfect|aorist) of /i,
+    /^(simple past|simple present|past tense|present tense) of /i,
+
+    // Cases (German, Latin, etc.)
+    /^(nominative|accusative|genitive|dative|vocative|locative|instrumental|ablative).* of /i,
+
+    // Degree (adjectives/adverbs)
+    /^(superlative|comparative|positive|equative) (form |degree )?of /i,
+
+    // Morphological derivations
+    /^(diminutive|augmentative|pejorative|endearing|frequentative|causative|intensive) (form )?of /i,
+    /^(agent noun|verbal noun|abstract noun|noun form) of /i,
+    /^gerund of /i,
+
+    // Alternative forms and spellings
+    /^(alternative|alternate|variant|archaic|obsolete|dated|rare|dialectal|regional|colloquial|informal|formal|literary|nonstandard|standard|poetic|vulgar|euphemistic) (form|spelling|variant) of /i,
+    /^(alternative|alternate|variant) of /i,
+
+    // Historical/obsolete spellings
+    /^(obsolete|archaic|dated|former|superseded|pre-reform|post-reform) (form|spelling) of /i,
+    /^(eye dialect|pronunciation spelling|misspelling|misconstruction) of /i,
+
+    // Shortened forms
+    /^(abbreviation|short form|shortened form|clipping|contraction|initialism|acronym|aphetic form|apocopic form|truncation) of /i,
+
+    // Voice and reflexivity
+    /^(passive|active|reflexive|middle voice|mediopassive) (form )?of /i,
+
+    // German-specific declension patterns
+    /^(strong|weak|mixed) (genitive|inflection|form|declension) of /i,
+    /^(attributive|predicative) (form )?of /i,
+    /^(definite|indefinite) (singular|plural|form) of /i,
+
+    // Combining forms
+    /^combining form of /i,
+
+    // Romanization/transliteration
+    /^(romanization|transliteration|latinization) of /i,
+
+    // Generic "form of" pattern (catches remaining cases)
+    /^[a-z]+ form of /i,
+  ];
+
+  return patterns.some(p => p.test(definition));
+}
+
+function extractBaseWord(definition: string): string | null {
+  // Try multiple extraction patterns in order of specificity
+
+  // Pattern 1: Match "X of WORD" where WORD might be followed by qualifiers
+  // Handles: "plural of word", "inflection of word:", "alternative form of word (archaic)"
+  let match = definition.match(/\bof\s+(?:the\s+)?([a-zA-ZÀ-ÿ\-]+)(?:\s|:|,|\(|$)/i);
+  if (match && match[1]) {
+    const candidate = match[1].toLowerCase();
+    // Skip common false positives (articles, prepositions that might appear)
+    if (!['the', 'a', 'an', 'to', 'in', 'on', 'at', 'for'].includes(candidate)) {
+      return match[1];
+    }
+  }
+
+  // Pattern 2: Handle cases where word might be in quotes
+  match = definition.match(/\bof\s+["']([^"']+)["']/i);
+  if (match && match[1]) {
+    return match[1];
+  }
+
+  // Pattern 3: Handle compound words with spaces (less common)
+  // "plural of hot dog" - grab up to the end or first delimiter
+  match = definition.match(/\bof\s+(?:the\s+)?([a-zA-ZÀ-ÿ\-]+(?:\s+[a-zA-ZÀ-ÿ\-]+)?)(?:\s*[,:(]|$)/i);
+  if (match && match[1]) {
+    const candidate = match[1].trim();
+    // Return only if it looks like a word (not too long)
+    if (candidate.length <= 30 && !candidate.includes('  ')) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Check if a word exists in the dictionary
+ */
+export function hasWord(word: string, language: SupportedLanguage): boolean {
+  return lookupWord(word, language) !== null;
+}
+
+/**
+ * Check if a language is supported
+ */
+export function isSupportedLanguage(language: string): language is SupportedLanguage {
+  return language === 'German' || language === 'Spanish' || language === 'French';
+}
+
+/**
+ * Get dictionary statistics
+ */
+export function getDictionaryStats(language: SupportedLanguage): { totalWords: number; loaded: boolean } {
+  try {
+    const db = getDb(language);
+    const result = db.prepare('SELECT COUNT(*) as count FROM words').get() as { count: number };
+    return { totalWords: result.count, loaded: true };
+  } catch {
+    return { totalWords: 0, loaded: false };
+  }
+}
+
+/**
+ * Check if database exists for a language
+ */
+export function isDatabaseAvailable(language: SupportedLanguage): boolean {
+  return fs.existsSync(getDbPath(language));
+}
+
+/**
+ * Search for words starting with a prefix (for autocomplete)
+ */
+export function searchPrefix(
+  prefix: string,
+  language: SupportedLanguage,
+  limit: number = 10
+): DictionaryEntry[] {
+  try {
+    const normalizedPrefix = prefix.toLowerCase().trim();
+    if (!normalizedPrefix || normalizedPrefix.length < 2) return [];
+
+    const db = getDb(language);
+    const rows = db.prepare(`
+      SELECT
+        word_original as word,
+        part_of_speech as partOfSpeech,
+        definition,
+        definitions_json as definitionsJson,
+        forms,
+        ipa,
+        audio
+      FROM words
+      WHERE word_lower LIKE ?
+        AND definition NOT LIKE 'inflection of%'
+        AND definition NOT LIKE 'plural of%'
+        AND definition NOT LIKE 'singular of%'
+        AND definition NOT LIKE '%form of%'
+        AND definition NOT LIKE '%spelling of%'
+        AND definition NOT LIKE '%participle of%'
+      ORDER BY LENGTH(word_original)
+      LIMIT ?
+    `).all(`${normalizedPrefix}%`, limit) as Record<string, unknown>[];
+
+    return rows.map(row => parseRow(row, language));
+  } catch (err) {
+    console.error('[Dictionary] Search error:', err);
+    return [];
+  }
+}
