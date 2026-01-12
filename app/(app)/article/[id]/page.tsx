@@ -54,6 +54,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const [showOriginal, setShowOriginal] = useState(false);
   const [audioTimestamps, setAudioTimestamps] = useState<WordTimestamp[] | null>(null);
   const [showReadingMode, setShowReadingMode] = useState(false);
+  const [initialReadingWordIndex, setInitialReadingWordIndex] = useState(0);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Cleanup polling on unmount
@@ -295,6 +296,30 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
         variant: "success",
       });
     }
+  };
+
+  const handleOpenReadingMode = () => {
+    if (!audioTimestamps || audioTimestamps.length === 0) {
+      setShowReadingMode(true);
+      return;
+    }
+
+    // Calculate scroll position to find starting word
+    const scrollWrapper = document.getElementById("app-scroll-wrapper");
+    if (scrollWrapper) {
+      const scrollPercent = scrollWrapper.scrollTop /
+        Math.max(1, scrollWrapper.scrollHeight - scrollWrapper.clientHeight);
+
+      // Find word at approximately this percentage through the article
+      // Use a bit ahead of the scroll position (user is reading what's visible, not what's scrolled past)
+      const adjustedPercent = Math.min(1, scrollPercent + 0.1); // Look 10% ahead
+      const wordIndex = Math.floor(adjustedPercent * audioTimestamps.length);
+      setInitialReadingWordIndex(Math.min(wordIndex, audioTimestamps.length - 1));
+    } else {
+      setInitialReadingWordIndex(0);
+    }
+
+    setShowReadingMode(true);
   };
 
   if (isLoading) {
@@ -592,7 +617,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
             <AudioPlayer
               audioUrl={signedAudioUrl}
               hasTimestamps={!!audioTimestamps && audioTimestamps.length > 0}
-              onReadingModeClick={() => setShowReadingMode(true)}
+              onReadingModeClick={handleOpenReadingMode}
             />
           ) : article.audioUrl ? (
             <div className="bg-white border-t md:border border-[#e8dfd3] md:rounded-2xl p-4 backdrop-blur-xl">
@@ -631,6 +656,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           targetLanguage={article.targetLanguage}
           articleId={article.id}
           onClose={() => setShowReadingMode(false)}
+          initialWordIndex={initialReadingWordIndex}
         />
       )}
     </div>

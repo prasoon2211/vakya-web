@@ -262,7 +262,7 @@ export function WordTooltip({
           )}
 
           {/* Action buttons - extra bottom padding for iOS safe area */}
-          <div className="flex gap-3 pt-2 pb-6">
+          <div className="flex gap-3 pt-2 pb-8">
             {!aiAnalysis && (
               <button
                 onClick={handleAnalyzeWithAI}

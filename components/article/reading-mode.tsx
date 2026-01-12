@@ -13,6 +13,7 @@ interface ReadingModeProps {
   targetLanguage: string;
   articleId: string;
   onClose: () => void;
+  initialWordIndex?: number; // Start from this word (will snap to sentence start)
 }
 
 const PLAYBACK_SPEEDS = [0.75, 1, 1.25];
@@ -22,19 +23,34 @@ function isSentenceEnd(word: string): boolean {
   return word.endsWith(".") || word.endsWith("!") || word.endsWith("?");
 }
 
+// Find the start of the sentence containing the given word index
+function findSentenceStart(timestamps: WordTimestamp[], wordIndex: number): number {
+  let idx = wordIndex;
+  // Go backwards until we find a sentence end (or reach the beginning)
+  while (idx > 0 && !isSentenceEnd(timestamps[idx - 1]?.word || "")) {
+    idx--;
+  }
+  return idx;
+}
+
 export function ReadingMode({
   audioUrl,
   timestamps,
   targetLanguage,
   articleId,
   onClose,
+  initialWordIndex = 0,
 }: ReadingModeProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [currentWordIndex, setCurrentWordIndex] = useState(0);
+  const [hasInitialized, setHasInitialized] = useState(false);
+
+  // Calculate initial position - snap to sentence start for cleaner UX
+  const startingWordIndex = findSentenceStart(timestamps, initialWordIndex);
+  const [currentWordIndex, setCurrentWordIndex] = useState(startingWordIndex);
   const [wasPlayingBeforeTap, setWasPlayingBeforeTap] = useState(false);
 
   // Update current word based on audio time
@@ -64,6 +80,29 @@ export function ReadingMode({
       audio.removeEventListener("ended", handleEnded);
     };
   }, []);
+
+  // Set initial audio position based on starting word
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || hasInitialized) return;
+
+    const initializePosition = () => {
+      if (startingWordIndex > 0 && timestamps[startingWordIndex]) {
+        audio.currentTime = timestamps[startingWordIndex].start;
+        setCurrentTime(timestamps[startingWordIndex].start);
+      }
+      setHasInitialized(true);
+    };
+
+    // If audio is already loaded, initialize immediately
+    if (audio.readyState >= 1) {
+      initializePosition();
+    } else {
+      // Otherwise wait for metadata to load
+      audio.addEventListener("loadedmetadata", initializePosition, { once: true });
+      return () => audio.removeEventListener("loadedmetadata", initializePosition);
+    }
+  }, [startingWordIndex, timestamps, hasInitialized]);
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
