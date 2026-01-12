@@ -392,7 +392,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
     <div className="min-h-screen pb-24">
       {/* Progress Banner for in-progress or failed translations */}
       {(isTranslationInProgress || isTranslationFailed) && hasContent && (
-        <div className={`sticky top-16 z-50 border-b ${isTranslationFailed ? 'bg-red-50 border-red-200' : 'bg-[#c45c3e]/5 border-[#c45c3e]/20'}`}>
+        <div className={`sticky top-0 md:top-16 z-50 border-b ${isTranslationFailed ? 'bg-red-50 border-red-200' : 'bg-[#c45c3e]/5 border-[#c45c3e]/20'}`}>
           <div className="mx-auto max-w-4xl px-4 py-2 sm:px-6">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -440,33 +440,34 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {/* Sticky Header */}
-      <header className={`sticky ${(isTranslationInProgress || isTranslationFailed) && hasContent ? 'top-[104px]' : 'top-16'} z-40 border-b border-[#e8dfd3] bg-white/95 backdrop-blur-sm`}>
-        <div className="mx-auto max-w-4xl px-4 py-3 sm:px-6">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
+      {/* Sticky Header - top-0 on mobile (main header hidden), top-16 on desktop */}
+      <header className={`sticky ${(isTranslationInProgress || isTranslationFailed) && hasContent ? 'top-0 md:top-[104px]' : 'top-0 md:top-16'} z-40 border-b border-[#e8dfd3] bg-white/95 backdrop-blur-sm`}>
+        <div className="mx-auto max-w-4xl px-3 py-2 sm:px-6 sm:py-3">
+          <div className="flex items-center justify-between gap-2 sm:gap-4">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <Link href="/dashboard">
-                <Button variant="ghost" size="icon" className="flex-shrink-0">
-                  <ArrowLeft className="h-5 w-5" />
+                <Button variant="ghost" size="icon" className="flex-shrink-0 h-8 w-8 sm:h-10 sm:w-10">
+                  <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
                 </Button>
               </Link>
-              <h1 className="text-lg font-semibold text-[#1a1a1a] truncate">
+              <h1 className="text-base sm:text-lg font-semibold text-[#1a1a1a] truncate">
                 {article.title || "Untitled"}
               </h1>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={handleShare}
+                className="h-8 w-8 sm:h-10 sm:w-10"
               >
                 <Share2 className="h-4 w-4" />
               </Button>
 
               <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
                 <DialogTrigger asChild>
-                  <Button variant="ghost" size="icon">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-10 sm:w-10">
                     <Trash2 className="h-4 w-4 text-red-500" />
                   </Button>
                 </DialogTrigger>
@@ -500,9 +501,9 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
       </header>
 
       {/* Article Content */}
-      <article className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <article className="mx-auto max-w-3xl px-4 py-4 sm:py-8 sm:px-6">
         {/* Meta info */}
-        <div className="flex flex-wrap items-center gap-3 mb-8">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 sm:mb-8">
           <Badge>{article.targetLanguage} {article.cefrLevel}</Badge>
           {article.status === "completed" && (
             <span className="text-sm text-[#6b6b6b]">
@@ -520,24 +521,19 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           </a>
         </div>
 
-        {/* Instructions */}
-        <Card className="p-4 mb-8 bg-gradient-to-r from-[#c45c3e]/5 to-[#2d5a47]/5 border-[#c45c3e]/20">
+        {/* Instructions - hidden on mobile to save space */}
+        <Card className="hidden md:block p-4 mb-8 bg-gradient-to-r from-[#c45c3e]/5 to-[#2d5a47]/5 border-[#c45c3e]/20">
           <div className="flex items-start gap-3">
             <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[#c45c3e]/10 flex items-center justify-center">
               <Sparkles className="h-4 w-4 text-[#c45c3e]" />
             </div>
             <p className="text-sm text-[#6b6b6b]">
               <strong className="text-[#1a1a1a]">Tip:</strong> Tap any word to see its meaning.
-              <span className="hidden md:inline">
-                {" "}Hold{" "}
-                <kbd className="px-1.5 py-0.5 text-xs bg-[#f3ede4] rounded border border-[#e8dfd3]">
-                  Cmd
-                </kbd>{" "}
-                to see the original text.
-              </span>
-              <span className="md:hidden">
-                {" "}Use the toggle button to see the original text.
-              </span>
+              Hold{" "}
+              <kbd className="px-1.5 py-0.5 text-xs bg-[#f3ede4] rounded border border-[#e8dfd3]">
+                Cmd
+              </kbd>{" "}
+              to see the original text.
             </p>
           </div>
         </Card>

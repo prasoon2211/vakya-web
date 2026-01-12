@@ -369,7 +369,7 @@ export default function VocabularyPage() {
       {/* Word Detail Dialog */}
       <Dialog open={!!selectedWord && !showDeleteDialog} onOpenChange={(open) => !open && setSelectedWord(null)}>
         {selectedWord && (
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {selectedWord.article && (
@@ -382,13 +382,13 @@ export default function VocabularyPage() {
               )}
             </DialogHeader>
 
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 py-4 overflow-hidden">
               {selectedWord.translation && (
                 <div>
                   <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Translation
                   </p>
-                  <p className="text-[#1a1a1a]">{selectedWord.translation}</p>
+                  <p className="text-[#1a1a1a] break-words">{selectedWord.translation}</p>
                 </div>
               )}
 
@@ -397,7 +397,7 @@ export default function VocabularyPage() {
                   <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Example
                   </p>
-                  <p className="text-[#6b6b6b] italic">{selectedWord.example}</p>
+                  <p className="text-[#6b6b6b] italic break-words">{selectedWord.example}</p>
                 </div>
               )}
 
@@ -406,7 +406,7 @@ export default function VocabularyPage() {
                   <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Context
                   </p>
-                  <p className="text-[#6b6b6b] italic">
+                  <p className="text-[#6b6b6b] italic break-words line-clamp-4">
                     &ldquo;{selectedWord.contextSentence}&rdquo;
                   </p>
                 </div>
@@ -417,7 +417,7 @@ export default function VocabularyPage() {
                   <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
                     Notes
                   </p>
-                  <p className="text-[#6b6b6b]">{selectedWord.notes}</p>
+                  <p className="text-[#6b6b6b] break-words">{selectedWord.notes}</p>
                 </div>
               )}
 

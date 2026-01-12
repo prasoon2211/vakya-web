@@ -1,12 +1,17 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 import { db, users, wordCache } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy-init Gemini client
+let geminiClient: GoogleGenAI | null = null;
+function getGemini() {
+  if (!geminiClient && process.env.GOOGLE_AI_API_KEY) {
+    geminiClient = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY });
+  }
+  return geminiClient;
+}
 
 // POST - AI word analysis with caching
 export async function POST(request: Request) {
@@ -56,7 +61,15 @@ export async function POST(request: Request) {
       });
     }
 
-    // Not in cache - call OpenAI
+    // Not in cache - call Gemini 2.5 Flash Lite (fast, cheap)
+    const gemini = getGemini();
+    if (!gemini) {
+      return NextResponse.json(
+        { error: "AI service not configured" },
+        { status: 500 }
+      );
+    }
+
     const prompt = `Analyze the word "${word}" in ${targetLanguage}${contextSentence ? ` appearing in this context: "${contextSentence}"` : ""}.
 The learner speaks ${nativeLanguage} and is learning ${targetLanguage} at ${cefrLevel} level.
 
@@ -70,20 +83,18 @@ Return ONLY a valid JSON object with these exact keys:
   "explanation": "brief explanation of usage, any irregularities, or helpful notes appropriate for a ${cefrLevel} learner (in ${nativeLanguage})"
 }`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-nano",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a language learning assistant. Provide accurate, helpful word analysis for language learners. Always respond with valid JSON only.",
+    const response = await gemini.models.generateContent({
+      model: "gemini-2.5-flash-lite",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        thinkingConfig: {
+          thinkingBudget: 0, // Disable thinking for speed
         },
-        { role: "user", content: prompt },
-      ],
-      response_format: { type: "json_object" },
+      },
     });
 
-    const content = response.choices[0]?.message?.content;
+    const content = response.text;
     if (!content) {
       return NextResponse.json(
         { error: "No response from AI" },

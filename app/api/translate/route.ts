@@ -1,14 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { db, users, articles } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy-init Gemini client
+let geminiClient: GoogleGenAI | null = null;
+function getGemini() {
+  if (!geminiClient && process.env.GOOGLE_AI_API_KEY) {
+    geminiClient = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY });
+  }
+  return geminiClient;
+}
 
 // Timeout wrapper for fetch
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = 30000): Promise<Response> {
@@ -237,15 +242,21 @@ const CEFR_GUIDELINES: Record<string, string> = {
 • Full vocabulary range`,
 };
 
-// Translate a single chunk of text
+// Translate a single chunk of text using Gemini 3 Flash
 async function translateChunk(
   text: string,
   targetLanguage: string,
   cefrLevel: string
 ): Promise<TranslationBlock> {
+  const gemini = getGemini();
+  if (!gemini) {
+    console.error("Gemini client not available - missing GOOGLE_AI_API_KEY");
+    return { original: text, translated: text };
+  }
+
   const levelGuidelines = CEFR_GUIDELINES[cefrLevel] || CEFR_GUIDELINES.B1;
 
-  const systemPrompt = `You are an expert language learning translator. Your task is to translate text into ${targetLanguage} that is TRULY appropriate for a ${cefrLevel} learner.
+  const prompt = `You are an expert language learning translator. Your task is to translate text into ${targetLanguage} that is TRULY appropriate for a ${cefrLevel} learner.
 
 CRITICAL: Sentence structure complexity matters MORE than vocabulary. A learner may know words but struggle with complex grammar. Your job is to make the text COMPREHENSIBLE at their level, not just use simple words.
 
@@ -267,27 +278,36 @@ B1 version: "Obwohl er die Sprache gut sprach, war der Dialekt schwer zu versteh
 B2+: Keep closer to original structure.
 
 Preserve paragraph breaks (blank lines between paragraphs).
-Return JSON: {"original": "input text", "translated": "your translation"}`;
+Return JSON: {"original": "input text", "translated": "your translation"}
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-5-mini",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: text },
-    ],
-    response_format: { type: "json_object" },
-  });
+Text to translate:
+${text}`;
 
-  const content = response.choices[0]?.message?.content;
-  if (content) {
-    try {
-      const parsed = JSON.parse(content);
-      if (parsed.translated) {
-        return { original: text, translated: parsed.translated };
+  try {
+    const response = await gemini.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        thinkingConfig: {
+          thinkingBudget: 0, // Disable thinking for speed (Gemini 2.5)
+        },
+      },
+    });
+
+    const content = response.text;
+    if (content) {
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed.translated) {
+          return { original: text, translated: parsed.translated };
+        }
+      } catch {
+        // If parsing fails, return original as translated (fallback)
       }
-    } catch {
-      // If parsing fails, return original as translated (fallback)
     }
+  } catch (error) {
+    console.error("Gemini translation error:", error);
   }
 
   // Fallback: return original text as translation
@@ -382,9 +402,8 @@ async function processTranslation(
       console.log(`[${articleId}] Extracted ${paragraphs.length} paragraphs`);
     }
 
-    // Phase 2: Translate in parallel
-    // OpenAI allows 30,000+ RPM for gpt-5-mini, so we translate each chunk individually
-    // This maximizes parallelism - each API call is fast, and we run many in parallel
+    // Phase 2: Translate in parallel using Gemini 3 Flash
+    // Each chunk gets its own API call for maximum parallelism
     const MAX_PARALLEL = 15; // 15 parallel requests for speed
     const startIndex = translatedBlocks.length;
     const remainingParagraphs = paragraphs.slice(startIndex);

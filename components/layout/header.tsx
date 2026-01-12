@@ -16,8 +16,14 @@ const navItems = [
 export function Header() {
   const pathname = usePathname();
 
+  // Hide header on article pages on mobile - article has its own header
+  const isArticlePage = pathname.startsWith("/article/");
+
   return (
-    <header className="sticky top-0 z-50 bg-[#faf7f2]/90 backdrop-blur-md border-b border-[#e8dfd3]">
+    <header className={cn(
+      "sticky top-0 z-50 bg-[#faf7f2]/90 backdrop-blur-md border-b border-[#e8dfd3]",
+      isArticlePage && "hidden md:block"
+    )}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 sm:gap-3 group">

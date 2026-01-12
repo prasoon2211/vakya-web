@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
+import { Drawer, DrawerContent, DrawerTrigger, DrawerTitle } from "@/components/ui/drawer";
 import { WordTooltip } from "./word-tooltip";
 import { useIsMobile } from "@/lib/hooks/use-media-query";
 
@@ -43,6 +43,7 @@ function WordSpan({ word, display, sentence, targetLanguage, articleId }: WordSp
           </span>
         </DrawerTrigger>
         <DrawerContent className="max-h-[85vh]">
+          <DrawerTitle className="sr-only">Word Definition</DrawerTitle>
           <div className="p-4 pb-8">
             <WordTooltip
               word={word}
@@ -142,6 +143,7 @@ function OriginalText({ text }: { text: string }) {
 }
 
 // A chunk may contain multiple paragraphs separated by \n\n
+// Renders BOTH original and translated, uses CSS to toggle (instant, no re-render)
 function TranslationChunk({
   block,
   targetLanguage,
@@ -158,18 +160,21 @@ function TranslationChunk({
 
   return (
     <div className="relative">
-      {showOriginal ? (
+      {/* Original text - hidden by default, shown when showOriginal is true */}
+      <div className={showOriginal ? "block" : "hidden"}>
         <OriginalText text={block.original} />
-      ) : (
-        translatedParagraphs.map((paragraph, i) => (
+      </div>
+      {/* Translated text - shown by default, hidden when showOriginal is true */}
+      <div className={showOriginal ? "hidden" : "block"}>
+        {translatedParagraphs.map((paragraph, i) => (
           <ParagraphText
             key={i}
             text={paragraph}
             targetLanguage={targetLanguage}
             articleId={articleId}
           />
-        ))
-      )}
+        ))}
+      </div>
     </div>
   );
 }

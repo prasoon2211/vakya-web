@@ -100,7 +100,7 @@ export function WordTooltip({
     }
   };
 
-  const handleSaveWord = async () => {
+  const handleSaveWord = async (fetchDetails = false) => {
     setIsSaving(true);
     try {
       const res = await fetch("/api/vocabulary", {
@@ -115,6 +115,7 @@ export function WordTooltip({
           example: aiAnalysis?.example || dictionaryResult?.example,
           targetLanguage,
           sourceArticleId: articleId,
+          fetchAIDetails: fetchDetails && !aiAnalysis, // Request AI analysis if we don't have it yet
         }),
       });
 
@@ -134,7 +135,7 @@ export function WordTooltip({
       setIsSaved(true);
       toast({
         title: "Word saved!",
-        description: "Added to your vocabulary",
+        description: fetchDetails && !aiAnalysis ? "Details will be fetched in the background" : "Added to your vocabulary",
         variant: "success",
       });
     } catch (error) {
@@ -227,24 +228,49 @@ export function WordTooltip({
             </p>
           )}
 
-          <Button
-            onClick={handleAnalyzeWithAI}
-            disabled={isLoadingAI}
-            variant="secondary"
-            className="w-full"
-          >
-            {isLoadingAI ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Analyzing...
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4 mr-2" />
-                {dictionaryResult.found ? "Get more details" : "Analyze with AI"}
-              </>
-            )}
-          </Button>
+          {/* Action buttons */}
+          <div className="flex gap-2">
+            <Button
+              onClick={handleAnalyzeWithAI}
+              disabled={isLoadingAI}
+              variant="secondary"
+              className="flex-1"
+            >
+              {isLoadingAI ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  {dictionaryResult.found ? "Details" : "Analyze"}
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={() => handleSaveWord(true)}
+              disabled={isSaved || isSaving}
+              className="flex-1"
+            >
+              {isSaved ? (
+                <>
+                  <Check className="h-4 w-4 mr-2" />
+                  Saved
+                </>
+              ) : isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <BookmarkPlus className="h-4 w-4 mr-2" />
+                  Save
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -298,7 +324,7 @@ export function WordTooltip({
 
           {/* Save button */}
           <Button
-            onClick={handleSaveWord}
+            onClick={() => handleSaveWord(false)}
             disabled={isSaved || isSaving}
             className="w-full"
           >
