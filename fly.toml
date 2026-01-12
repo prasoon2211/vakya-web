@@ -9,7 +9,7 @@ primary_region = 'fra'
 [build]
 
 [deploy]
-  release_command = "npm run db:migrate"
+  release_command = "npm run db:migrate:prod"
 
 [http_service]
   internal_port = 3000
