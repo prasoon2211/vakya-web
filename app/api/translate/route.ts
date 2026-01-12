@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { db, users, articles } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
+import { getCefrGuidelines } from "@/lib/cefr-guidelines";
 
 // Lazy-init Gemini client
 let geminiClient: GoogleGenAI | null = null;
@@ -158,15 +159,22 @@ interface SiteConfig {
   patterns: string[];
   // Don't chunk - send full article to AI in one request
   noChunk?: boolean;
+  // Skip Readability extraction - pass raw HTML to AI instead
+  skipReadability?: boolean;
+  // When true, AI returns cleaned original text (useful when sending raw HTML)
+  returnCleanOriginal?: boolean;
   // Custom extraction hints (future use)
   extractionHints?: string;
 }
 
 const SITE_CONFIGS: SiteConfig[] = [
   {
-    // Le Monde: Tons of paywall/device garbage that confuses chunking
+    // Le Monde: Readability often fails or extracts poorly
+    // Skip Readability entirely, send raw HTML to AI for extraction
     patterns: ['lemonde.fr'],
     noChunk: true,
+    skipReadability: true,
+    returnCleanOriginal: true, // AI returns cleaned original text
   },
   // Add more problematic sites here as needed:
   // {
@@ -315,62 +323,6 @@ function smartChunkContent(content: string): string[] {
   return merged.filter(chunk => chunk.trim().length > 0);
 }
 
-// CEFR level-specific translation guidelines
-const CEFR_GUIDELINES: Record<string, string> = {
-  A1: `A1 (Beginner) - STRICT SIMPLIFICATION REQUIRED:
-• Maximum 8-10 words per sentence
-• ONLY simple main clauses (Subject-Verb-Object)
-• NO subordinate clauses (no weil, dass, wenn, obwohl, etc.)
-• Present tense ONLY
-• Connectors limited to: und, oder, aber
-• NO passive voice, NO relative clauses
-• Break every complex sentence into multiple simple ones
-• Use only the 500 most common words`,
-
-  A2: `A2 (Elementary) - SIGNIFICANT SIMPLIFICATION:
-• Maximum 12-15 words per sentence
-• At most ONE subordinate clause per sentence
-• Tenses: present + Perfekt (simple past)
-• Allowed connectors: und, oder, aber, weil, dass, wenn
-• NO passive voice
-• Simple relative clauses (der/die/das) sparingly
-• Break long sentences into 2-3 shorter ones
-• Use common everyday vocabulary (~1500 words)`,
-
-  B1: `B1 (Intermediate) - MODERATE SIMPLIFICATION:
-• Maximum 18-20 words per sentence
-• Up to TWO subordinate clauses per sentence
-• All common tenses including future
-• Connectors: weil, dass, wenn, obwohl, damit, nachdem, bevor
-• Simple passive voice acceptable
-• Relative clauses acceptable
-• Can express opinions and reasoning
-• Break very long sentences (3+ clauses) into shorter ones
-• Intermediate vocabulary (~3000 words)`,
-
-  B2: `B2 (Upper-Intermediate) - LIGHT SIMPLIFICATION:
-• Maximum 25 words per sentence
-• Complex sentence structures allowed
-• All tenses including Konjunktiv II
-• Idiomatic expressions acceptable
-• Passive voice freely used
-• Only break extremely long sentences (4+ nested clauses)
-• Upper-intermediate vocabulary, some abstract terms`,
-
-  C1: `C1 (Advanced) - MINIMAL CHANGES:
-• Near-native sentence complexity allowed
-• All grammatical structures permitted
-• Nuanced and sophisticated expression
-• Only simplify if truly incomprehensible
-• Advanced vocabulary, abstract concepts OK`,
-
-  C2: `C2 (Mastery) - PRESERVE ORIGINAL STYLE:
-• Native-level complexity preserved
-• Literary and journalistic style maintained
-• Minimal intervention, translate naturally
-• Full vocabulary range`,
-};
-
 // Detect the language of text using Gemini
 async function detectLanguage(text: string): Promise<string> {
   const gemini = getGemini();
@@ -413,7 +365,8 @@ ${sample}`;
 async function translateChunk(
   text: string,
   targetLanguage: string,
-  cefrLevel: string
+  cefrLevel: string,
+  options?: { returnCleanOriginal?: boolean }
 ): Promise<TranslationBlock> {
   const gemini = getGemini();
   if (!gemini) {
@@ -421,43 +374,74 @@ async function translateChunk(
     return { original: text, translated: text };
   }
 
-  const levelGuidelines = CEFR_GUIDELINES[cefrLevel] || CEFR_GUIDELINES.B1;
+  // Get comprehensive CEFR guidelines (generic + language-specific)
+  const levelGuidelines = getCefrGuidelines(targetLanguage, cefrLevel);
 
-  const prompt = `Translate/adapt article text into ${targetLanguage} for a ${cefrLevel} learner.
+  // Determine output format based on options
+  const returnCleanOriginal = options?.returnCleanOriginal ?? false;
 
-## ${levelGuidelines}
+  const outputInstructions = returnCleanOriginal
+    ? `Return JSON format:
+{
+  "original": "the CLEAN extracted article text in the SOURCE language (no HTML, no garbage - just the article paragraphs)",
+  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level"
+}
 
-## CRITICAL: This text is web-scraped and contains GARBAGE mixed with the article.
+IMPORTANT: The "original" field must contain the clean, readable source article text - NOT HTML, NOT a summary.`
+    : `Return JSON format:
+{
+  "original": "brief description of source content",
+  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level covering all main points"
+}`;
 
-Your job: Extract and translate ONLY the actual news/article content. DISCARD everything else.
+  const prompt = `You are a professional language learning content adapter. Your job is to extract article content and translate/adapt it into ${targetLanguage} for a ${cefrLevel} learner.
 
-REAL ARTICLE CONTENT (translate this):
-- Journalist-written news paragraphs
-- Quotes from people in the news
-- Factual reporting about events
+${levelGuidelines}
 
-GARBAGE - DO NOT TRANSLATE, DO NOT INCLUDE (return empty string):
-- ANY text about subscriptions, accounts, logging in, signing up
-- ANY text about reading on multiple devices or device limits
-- ANY text asking "How to not see this message?" or similar FAQ
-- ANY text about passwords, account sharing, or family plans
-- Navigation breadcrumbs or repeated category names
-- Social media prompts
+---
+
+## CONTENT EXTRACTION RULES
+
+The input may be either:
+- Raw HTML from a news website (extract the article text, ignore all HTML tags/markup)
+- Plain text that's already been extracted
+
+From either format, extract ONLY the main article content.
+
+INCLUDE (extract and translate):
+- News paragraphs and journalism
+- Quotes and statements from people
+- Factual information and reporting
+- Analysis and commentary
+- ALL important details, quotes, and context from the article
+
+EXCLUDE completely (ignore, do not translate):
+- HTML tags, scripts, styles, metadata
+- Subscription/paywall prompts
+- Login/signup requests
+- Navigation, menus, footers
 - Cookie notices
-- Author bylines like "Le Monde avec AFP" or "By [name]"
+- Social media buttons
+- "Read also" / "Lire aussi" links
+- Advertisements
 
-BE AGGRESSIVE: If text discusses accounts, devices, subscriptions, passwords, or login - it is GARBAGE, not article content. Real news articles don't talk about these things.
+If the input contains ONLY non-article content, return: {"original": "", "translated": ""}
 
-If this chunk has NO real article content, return: {"original": "...", "translated": ""}
+---
 
-## Translation:
-1. Extract ONLY genuine journalism
-2. Adapt complexity for ${cefrLevel}
-3. Break long sentences if needed
+## YOUR TASK
 
-Return JSON: {"original": "...", "translated": "extracted and translated article content OR empty string if all garbage"}
+1. If input is HTML: extract the article text first (ignore all HTML markup)
+2. Identify ALL key points, quotes, and facts from the article
+3. Translate/adapt into ${targetLanguage} at ${cefrLevel} level
+4. Apply ALL grammar and vocabulary constraints from the guidelines above
+5. IMPORTANT: Capture all significant information - don't over-summarize
 
-Text:
+${outputInstructions}
+
+---
+
+INPUT:
 ${text}`;
 
   try {
@@ -474,7 +458,11 @@ ${text}`;
       try {
         const parsed = JSON.parse(content);
         if (parsed.translated) {
-          return { original: text, translated: parsed.translated };
+          // Use AI's cleaned original if returnCleanOriginal is enabled and AI provided it
+          const originalText = (returnCleanOriginal && parsed.original && parsed.original.length > 50)
+            ? parsed.original
+            : text;
+          return { original: originalText, translated: parsed.translated };
         }
       } catch {
         // If parsing fails, return original as translated (fallback)
@@ -493,17 +481,18 @@ ${text}`;
 async function translateBatch(
   batch: string[],
   targetLanguage: string,
-  cefrLevel: string
+  cefrLevel: string,
+  options?: { returnCleanOriginal?: boolean }
 ): Promise<TranslationBlock[]> {
   // For single chunk (our main use case now), call directly
   if (batch.length === 1) {
-    const result = await translateChunk(batch[0], targetLanguage, cefrLevel);
+    const result = await translateChunk(batch[0], targetLanguage, cefrLevel, options);
     return [result];
   }
 
   // For multiple chunks, translate each
   const results = await Promise.all(
-    batch.map(chunk => translateChunk(chunk, targetLanguage, cefrLevel))
+    batch.map(chunk => translateChunk(chunk, targetLanguage, cefrLevel, options))
   );
   return results;
 }
@@ -521,10 +510,17 @@ async function processTranslation(
   let translatedBlocks = [...existingBlocks];
   let title = "Untitled";
 
+  // Check for site-specific config (used in both Phase 1 and Phase 2)
+  const siteConfig = getSiteConfig(sourceUrl);
+
   try {
     // Phase 1: Fetch content if needed
     if (paragraphs.length === 0) {
       console.log(`[${articleId}] Fetching article from ${sourceUrl}`);
+
+      if (siteConfig) {
+        console.log(`[${articleId}] Site config found for ${new URL(sourceUrl).hostname}: noChunk=${siteConfig.noChunk}, skipReadability=${siteConfig.skipReadability}, returnCleanOriginal=${siteConfig.returnCleanOriginal}`);
+      }
 
       const fetchResult = await fetchArticleHtml(sourceUrl, articleId);
 
@@ -536,41 +532,55 @@ async function processTranslation(
         return;
       }
 
-      console.log(`[${articleId}] Extracting with Readability...`);
-      const extractStart = Date.now();
-      const extracted = extractArticleContent(fetchResult.html, sourceUrl);
-      console.log(`[${articleId}] Readability took ${Date.now() - extractStart}ms`);
+      let contentForTranslation: string;
 
-      if (!extracted || !extracted.content || extracted.content.length < 100) {
-        await db
-          .update(articles)
-          .set({ status: "failed", errorMessage: "Article content too short or couldn't be extracted" })
-          .where(eq(articles.id, articleId));
-        return;
+      // For sites where Readability fails/is problematic, pass raw HTML to AI
+      if (siteConfig?.skipReadability) {
+        console.log(`[${articleId}] Skipping Readability - passing HTML directly to AI (${fetchResult.html.length} bytes)`);
+        // Pass the raw HTML - AI will extract the article content
+        contentForTranslation = fetchResult.html;
+        // Try to extract title from HTML
+        const titleMatch = fetchResult.html.match(/<title[^>]*>([^<]+)<\/title>/i);
+        title = titleMatch ? titleMatch[1].replace(/\s*[-|].*$/, '').trim() : "Untitled";
+      } else {
+        // Normal path: Use Readability for extraction
+        console.log(`[${articleId}] Extracting with Readability...`);
+        const extractStart = Date.now();
+        const extracted = extractArticleContent(fetchResult.html, sourceUrl);
+        console.log(`[${articleId}] Readability took ${Date.now() - extractStart}ms`);
+
+        if (!extracted || !extracted.content || extracted.content.length < 100) {
+          await db
+            .update(articles)
+            .set({ status: "failed", errorMessage: "Article content too short or couldn't be extracted" })
+            .where(eq(articles.id, articleId));
+          return;
+        }
+
+        title = extracted.title;
+        contentForTranslation = extracted.content;
       }
-
-      title = extracted.title;
-
-      // Check for site-specific config
-      const siteConfig = getSiteConfig(sourceUrl);
 
       // Chunk or not based on site config
       if (siteConfig?.noChunk) {
         // Problematic site - send full content as single chunk
-        paragraphs = [extracted.content];
-        console.log(`[${articleId}] Site config: noChunk=true for ${new URL(sourceUrl).hostname}`);
-        console.log(`[${articleId}] Sending full content as single chunk: ${countWords(extracted.content)} words`);
+        paragraphs = [contentForTranslation];
+        console.log(`[${articleId}] Site config: noChunk=true`);
+        console.log(`[${articleId}] Sending full content as single chunk: ${contentForTranslation.length} chars`);
       } else {
         // Normal site - smart chunk for parallel processing
-        paragraphs = smartChunkContent(extracted.content);
-        console.log(`[${articleId}] Smart chunking: ${countWords(extracted.content)} words → ${paragraphs.length} chunks`);
+        paragraphs = smartChunkContent(contentForTranslation);
+        console.log(`[${articleId}] Smart chunking: ${countWords(contentForTranslation)} words → ${paragraphs.length} chunks`);
         console.log(`[${articleId}] Chunk sizes: ${paragraphs.map(p => countWords(p)).join(', ')} words`);
       }
 
-      // Detect source language
+      // Detect source language (use first 1000 chars of content, not HTML)
+      const textSample = siteConfig?.skipReadability
+        ? contentForTranslation.replace(/<[^>]+>/g, ' ').slice(0, 1000)
+        : contentForTranslation.slice(0, 1000);
       console.log(`[${articleId}] Detecting source language...`);
       const detectStart = Date.now();
-      const sourceLanguage = await detectLanguage(extracted.content);
+      const sourceLanguage = await detectLanguage(textSample);
       console.log(`[${articleId}] Detected source language: ${sourceLanguage} (took ${Date.now() - detectStart}ms)`);
 
       // Note: Even if source = target, we still process through AI to:
@@ -618,8 +628,9 @@ async function processTranslation(
       console.log(`[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, remainingParagraphs.length)} of ${remainingParagraphs.length} (${wave.length} parallel)`);
 
       // Run parallel translations - each chunk gets its own API call
+      const translateOptions = siteConfig?.returnCleanOriginal ? { returnCleanOriginal: true } : undefined;
       const results = await Promise.allSettled(
-        wave.map((chunk) => translateBatch([chunk], targetLanguage, cefrLevel))
+        wave.map((chunk) => translateBatch([chunk], targetLanguage, cefrLevel, translateOptions))
       );
 
       // Process results in order

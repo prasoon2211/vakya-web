@@ -169,49 +169,49 @@ export function WordTooltip({
     <div className="w-full">
       {/* Loading state */}
       {isLoadingDict && (
-        <div className="flex flex-col items-center justify-center py-12">
+        <div className="flex flex-col items-center justify-center py-8 md:py-4">
           <div className="relative">
-            <div className="w-12 h-12 rounded-full border-2 border-[#e8dfd3]" />
-            <div className="absolute inset-0 w-12 h-12 rounded-full border-2 border-[#c45c3e] border-t-transparent animate-spin" />
+            <div className="w-10 h-10 md:w-8 md:h-8 rounded-full border-2 border-[#e8dfd3]" />
+            <div className="absolute inset-0 w-10 h-10 md:w-8 md:h-8 rounded-full border-2 border-[#c45c3e] border-t-transparent animate-spin" />
           </div>
-          <p className="mt-4 text-sm text-[#9a9a9a]">Looking up word...</p>
+          <p className="mt-3 md:mt-2 text-sm md:text-xs text-[#9a9a9a]">Looking up word...</p>
         </div>
       )}
 
       {/* Main content */}
       {!isLoadingDict && dictionaryResult && (
-        <div className="space-y-6">
+        <div className="space-y-4 md:space-y-3">
           {/* Word header section */}
-          <div className="text-center pb-4 border-b border-[#f3ede4]">
+          <div className="text-center pb-3 md:pb-2 border-b border-[#f3ede4]">
             {/* Article + Word */}
             <div className="flex items-baseline justify-center gap-2">
               {article && (
-                <span className="text-[#c45c3e] text-lg font-medium">{article}</span>
+                <span className="text-[#c45c3e] text-lg md:text-base font-medium">{article}</span>
               )}
-              <h2 className="text-3xl font-semibold text-[#1a1a1a] tracking-tight">
+              <h2 className="text-3xl md:text-2xl font-semibold text-[#1a1a1a] tracking-tight">
                 {word}
               </h2>
             </div>
 
             {/* Phonetic + Audio */}
-            <div className="flex items-center justify-center gap-2 mt-2">
+            <div className="flex items-center justify-center gap-2 mt-1.5">
               {phonetic && (
-                <span className="text-[#9a9a9a] text-sm">{phonetic}</span>
+                <span className="text-[#9a9a9a] text-sm md:text-xs">{phonetic}</span>
               )}
               {audioUrl && (
                 <button
                   onClick={playAudio}
-                  className="p-1.5 rounded-full hover:bg-[#f3ede4] transition-colors group"
+                  className="p-1.5 md:p-1 rounded-full hover:bg-[#f3ede4] transition-colors group"
                 >
-                  <Volume2 className="h-4 w-4 text-[#9a9a9a] group-hover:text-[#c45c3e] transition-colors" />
+                  <Volume2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-[#9a9a9a] group-hover:text-[#c45c3e] transition-colors" />
                 </button>
               )}
             </div>
 
             {/* Part of speech pill */}
             {partOfSpeech && (
-              <div className="mt-3">
-                <span className="inline-block px-3 py-1 text-xs font-medium text-[#6b6b6b] bg-[#f3ede4] rounded-full">
+              <div className="mt-2 md:mt-1.5">
+                <span className="inline-block px-2.5 md:px-2 py-0.5 text-xs md:text-[10px] font-medium text-[#6b6b6b] bg-[#f3ede4] rounded-full">
                   {partOfSpeech}
                 </span>
               </div>
@@ -220,8 +220,8 @@ export function WordTooltip({
 
           {/* Translation - the hero section */}
           {(translation || definition) && (
-            <div className="bg-gradient-to-br from-[#faf8f5] to-[#f3ede4] rounded-2xl p-5">
-              <p className="text-[#1a1a1a] text-xl font-medium leading-relaxed">
+            <div className="bg-gradient-to-br from-[#faf8f5] to-[#f3ede4] rounded-xl md:rounded-lg p-4 md:p-3">
+              <p className="text-[#1a1a1a] text-lg md:text-base font-medium leading-relaxed">
                 {translation || definition}
               </p>
             </div>
@@ -238,9 +238,9 @@ export function WordTooltip({
 
           {/* Example */}
           {example && (
-            <div className="relative pl-4">
+            <div className="relative pl-3 md:pl-2.5">
               <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-[#c45c3e] to-[#c45c3e]/30 rounded-full" />
-              <p className="text-[#4a4a4a] italic leading-relaxed">
+              <p className="text-[#4a4a4a] text-base md:text-sm italic leading-relaxed">
                 &ldquo;{example}&rdquo;
               </p>
             </div>
@@ -248,28 +248,29 @@ export function WordTooltip({
 
           {/* AI Explanation */}
           {explanation && (
-            <div className="bg-[#faf8f5] rounded-xl p-4 border border-[#f3ede4]">
-              <div className="flex items-center gap-2 mb-2">
-                <Sparkles className="h-3.5 w-3.5 text-[#c45c3e]" />
-                <span className="text-xs font-medium text-[#9a9a9a] uppercase tracking-wide">
+            <div className="bg-[#faf8f5] rounded-xl md:rounded-lg p-3 md:p-2.5 border border-[#f3ede4]">
+              <div className="flex items-center gap-1.5 mb-1.5 md:mb-1">
+                <Sparkles className="h-3.5 w-3.5 md:h-3 md:w-3 text-[#c45c3e]" />
+                <span className="text-xs md:text-[10px] font-medium text-[#9a9a9a] uppercase tracking-wide">
                   Note
                 </span>
               </div>
-              <p className="text-sm text-[#4a4a4a] leading-relaxed">
+              <p className="text-sm md:text-xs text-[#4a4a4a] leading-relaxed">
                 {explanation}
               </p>
             </div>
           )}
 
-          {/* Action buttons - extra bottom padding for iOS safe area */}
-          <div className="flex gap-3 pt-2 pb-8">
+          {/* Action buttons - compact on desktop, larger on mobile */}
+          <div className="flex gap-2 md:gap-2 pt-2 pb-8 md:pb-2">
             {!aiAnalysis && (
               <button
                 onClick={handleAnalyzeWithAI}
                 disabled={isLoadingAI}
                 className={cn(
-                  "flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl",
-                  "text-sm font-medium transition-all duration-200",
+                  "flex-1 flex items-center justify-center gap-1.5 md:gap-1.5",
+                  "py-3 md:py-2 px-3 md:px-3 rounded-xl md:rounded-lg",
+                  "text-sm md:text-xs font-medium transition-all duration-200",
                   "border border-[#e8dfd3] text-[#6b6b6b]",
                   "hover:border-[#c45c3e]/30 hover:text-[#c45c3e] hover:bg-[#c45c3e]/5",
                   "disabled:opacity-50 disabled:cursor-not-allowed"
@@ -277,12 +278,12 @@ export function WordTooltip({
               >
                 {isLoadingAI ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 md:h-3.5 md:w-3.5 animate-spin" />
                     <span>Analyzing...</span>
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4" />
+                    <Sparkles className="h-4 w-4 md:h-3.5 md:w-3.5" />
                     <span>{dictionaryResult.found ? "More details" : "AI Analysis"}</span>
                   </>
                 )}
@@ -293,28 +294,29 @@ export function WordTooltip({
               onClick={() => handleSaveWord(!aiAnalysis)}
               disabled={isSaved || isSaving}
               className={cn(
-                "flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl",
-                "text-sm font-medium transition-all duration-200",
+                "flex items-center justify-center gap-1.5 md:gap-1.5",
+                "py-3 md:py-2 px-5 md:px-3 rounded-xl md:rounded-lg",
+                "text-sm md:text-xs font-medium transition-all duration-200",
                 aiAnalysis ? "flex-1" : "",
                 isSaved
                   ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
-                  : "bg-[#c45c3e] text-white shadow-lg shadow-[#c45c3e]/20 hover:bg-[#b35537] active:scale-[0.98]",
+                  : "bg-[#c45c3e] text-white shadow-md md:shadow-sm shadow-[#c45c3e]/20 hover:bg-[#b35537] active:scale-[0.98]",
                 "disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
               )}
             >
               {isSaved ? (
                 <>
-                  <Check className="h-4 w-4" />
+                  <Check className="h-4 w-4 md:h-3.5 md:w-3.5" />
                   <span>Saved</span>
                 </>
               ) : isSaving ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 md:h-3.5 md:w-3.5 animate-spin" />
                   <span>Saving...</span>
                 </>
               ) : (
                 <>
-                  <BookmarkPlus className="h-4 w-4" />
+                  <BookmarkPlus className="h-4 w-4 md:h-3.5 md:w-3.5" />
                   <span>Save word</span>
                 </>
               )}
