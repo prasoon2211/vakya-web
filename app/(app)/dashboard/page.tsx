@@ -248,10 +248,11 @@ export default function DashboardPage() {
   const isTranslating = translationState.status === "fetching" || translationState.status === "translating";
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10">
-      {/* Quick Translate Section */}
-      <section className="mb-16 opacity-0 animate-fade-up" style={{ animationDelay: '0.1s', animationFillMode: 'forwards' }}>
-        <div className="relative rounded-2xl border border-[#e8dfd3] bg-white p-8 shadow-sm overflow-hidden">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+      {/* Quick Translate Section - Mobile: Clean and flat, Desktop: Card with decorations */}
+      <section className="mb-10 sm:mb-16 opacity-0 animate-fade-up" style={{ animationDelay: '0.1s', animationFillMode: 'forwards' }}>
+        {/* Desktop: Card wrapper */}
+        <div className="hidden sm:block relative rounded-2xl border border-[#e8dfd3] bg-white p-8 shadow-sm overflow-hidden">
           {/* Decorative corner accent */}
           <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-[#c45c3e]/5 to-transparent pointer-events-none" />
           <div className="absolute -top-8 -right-8 w-24 h-24 border border-[#c45c3e]/10 rounded-full pointer-events-none" />
@@ -281,7 +282,7 @@ export default function DashboardPage() {
                 className="h-14 text-base"
               />
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[#3d3d3d] mb-2">
                     Target Language
@@ -382,11 +383,113 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* Mobile: Clean, flat design with clear section */}
+        <div className="sm:hidden">
+          <div className="bg-white rounded-2xl p-4 border border-[#e8dfd3] space-y-3">
+            <p className="text-sm font-medium text-[#6b6b6b]">Translate an article</p>
+
+            <Input
+              placeholder="Paste a URL..."
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              disabled={isTranslating}
+              className="h-12 text-base border-[#e8dfd3]"
+            />
+
+            <div className="flex gap-3">
+              <Select value={targetLanguage} onValueChange={setTargetLanguage} disabled={isTranslating}>
+                <SelectTrigger className="h-11 flex-1">
+                  <SelectValue placeholder="Language" />
+                </SelectTrigger>
+                <SelectContent>
+                  {LANGUAGES.map((lang) => (
+                    <SelectItem key={lang} value={lang}>
+                      {lang}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={cefrLevel} onValueChange={setCefrLevel} disabled={isTranslating}>
+                <SelectTrigger className="h-11 w-24">
+                  <SelectValue placeholder="Level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CEFR_LEVELS.map((level) => (
+                    <SelectItem key={level.value} value={level.value}>
+                      {level.value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {translationState.status === "failed" ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span className="text-sm">{getStatusMessage()}</span>
+                </div>
+                <div className="flex gap-3">
+                  <Button
+                    onClick={handleCancel}
+                    variant="outline"
+                    className="flex-1 h-12"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleRetry}
+                    className="flex-1 h-12"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            ) : isTranslating ? (
+              <div className="space-y-3 p-4 bg-[#faf8f5] rounded-xl">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="w-5 h-5 animate-spin text-[#c45c3e]" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-[#1a1a1a]">{getStatusMessage()}</span>
+                    {getStatusSubMessage() && (
+                      <p className="text-xs text-[#6b6b6b] truncate mt-0.5">{getStatusSubMessage()}</p>
+                    )}
+                  </div>
+                </div>
+                {translationState.status === "translating" && translationState.total && translationState.total > 0 ? (
+                  <div className="w-full h-2 bg-[#e8dfd3] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#c45c3e] rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${Math.round(((translationState.progress || 0) / translationState.total) * 100)}%` }}
+                    />
+                  </div>
+                ) : (
+                  <div className="w-full h-2 bg-[#e8dfd3] rounded-full overflow-hidden">
+                    <div className="h-full bg-[#c45c3e]/50 rounded-full animate-pulse w-1/3" />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Button
+                onClick={handleTranslate}
+                disabled={!url.trim()}
+                className="w-full h-12"
+              >
+                <Sparkles className="w-4 h-4 mr-2" />
+                Translate
+              </Button>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* Article History Section */}
       <section className="opacity-0 animate-fade-up" style={{ animationDelay: '0.2s', animationFillMode: 'forwards' }}>
-        <div className="flex items-center justify-between mb-6">
+        {/* Desktop header */}
+        <div className="hidden sm:flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 rounded-xl bg-[#2d5a47]/10 flex items-center justify-center">
               <BookOpen className="w-5 h-5 text-[#2d5a47]" />
@@ -404,23 +507,43 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Mobile header */}
+        <div className="sm:hidden flex items-center gap-3 mb-4">
+          <div className="w-9 h-9 rounded-xl bg-[#2d5a47]/10 flex items-center justify-center">
+            <BookOpen className="w-4 h-4 text-[#2d5a47]" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-[#1a1a1a]">Your Articles</h2>
+            {articles.length > 0 && (
+              <p className="text-xs text-[#9a9a9a]">{articles.length} translated</p>
+            )}
+          </div>
+        </div>
+
         {isLoading ? (
-          <div className="flex items-center justify-center py-20">
+          <div className="flex items-center justify-center py-12 sm:py-20">
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="w-8 h-8 animate-spin text-[#c45c3e]" />
               <p className="text-sm text-[#9a9a9a]">Loading your articles...</p>
             </div>
           </div>
         ) : articles.length === 0 ? (
-          <Card className="p-12 text-center border-dashed border-2 bg-[#faf7f2]">
-            <div className="w-16 h-16 rounded-2xl bg-[#f3ede4] flex items-center justify-center mx-auto mb-4">
-              <Globe className="w-8 h-8 text-[#9a9a9a]" />
+          <>
+            {/* Desktop empty state */}
+            <Card className="hidden sm:block p-12 text-center border-dashed border-2 bg-[#faf7f2]">
+              <div className="w-16 h-16 rounded-2xl bg-[#f3ede4] flex items-center justify-center mx-auto mb-4">
+                <Globe className="w-8 h-8 text-[#9a9a9a]" />
+              </div>
+              <h3 className="font-serif text-xl font-semibold text-[#1a1a1a] mb-2">No articles yet</h3>
+              <p className="text-[#6b6b6b] mb-6 max-w-sm mx-auto">
+                Translate your first article to start learning. Just paste a URL above.
+              </p>
+            </Card>
+            {/* Mobile empty state - simpler */}
+            <div className="sm:hidden text-center py-8 text-[#9a9a9a]">
+              <p className="text-sm">No articles yet. Paste a URL above to get started.</p>
             </div>
-            <h3 className="font-serif text-xl font-semibold text-[#1a1a1a] mb-2">No articles yet</h3>
-            <p className="text-[#6b6b6b] mb-6 max-w-sm mx-auto">
-              Translate your first article to start learning. Just paste a URL above.
-            </p>
-          </Card>
+          </>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {articles.map((article, index) => (

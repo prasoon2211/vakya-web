@@ -44,7 +44,7 @@ function WordSpan({ word, display, sentence, targetLanguage, articleId }: WordSp
         </DrawerTrigger>
         <DrawerContent className="max-h-[85vh]">
           <DrawerTitle className="sr-only">Word Definition</DrawerTitle>
-          <div className="p-4 pb-8">
+          <div className="px-6 pt-2 pb-10">
             <WordTooltip
               word={word}
               contextSentence={sentence}
@@ -69,7 +69,6 @@ function WordSpan({ word, display, sentence, targetLanguage, articleId }: WordSp
         </span>
       </PopoverTrigger>
       <PopoverContent
-        className="w-80 p-4"
         side="top"
         align="center"
         sideOffset={8}

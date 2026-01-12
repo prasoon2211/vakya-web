@@ -167,9 +167,9 @@ export function ReadingModeText({
             }
           }}
         >
-          <DrawerContent className="max-h-[85vh] bg-white border-t border-[#e8dfd3]">
+          <DrawerContent className="max-h-[85vh]">
             <DrawerTitle className="sr-only">Word Definition</DrawerTitle>
-            <div className="p-6 overflow-y-auto">
+            <div className="px-6 pt-2 pb-10 overflow-y-auto">
               <WordTooltip
                 word={timestamps[selectedWordIndex].word}
                 contextSentence={getContextSentence(selectedWordIndex)}

@@ -6,7 +6,6 @@ import {
   BookOpen,
   RotateCcw,
   Trophy,
-  Trash2,
   Loader2,
   ChevronRight,
   X,
@@ -24,10 +23,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+} from "@/components/ui/drawer";
 import { toast } from "@/components/ui/use-toast";
+import { useIsMobile } from "@/lib/hooks/use-media-query";
+import { cn } from "@/lib/utils";
 import type { SavedWord } from "@/lib/db/schema";
 
 export default function VocabularyPage() {
+  const isMobile = useIsMobile();
   const [words, setWords] = useState<SavedWord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState("all");
@@ -366,83 +373,189 @@ export default function VocabularyPage() {
         </div>
       )}
 
-      {/* Word Detail Dialog */}
-      <Dialog open={!!selectedWord && !showDeleteDialog} onOpenChange={(open) => !open && setSelectedWord(null)}>
-        {selectedWord && (
-          <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                {selectedWord.article && (
-                  <span className="text-[#c45c3e]">{selectedWord.article}</span>
+      {/* Word Detail - Drawer on mobile, Dialog on desktop */}
+      {isMobile ? (
+        <Drawer open={!!selectedWord && !showDeleteDialog} onOpenChange={(open) => !open && setSelectedWord(null)}>
+          {selectedWord && (
+            <DrawerContent className="max-h-[92vh]">
+              <DrawerTitle className="sr-only">{selectedWord.word}</DrawerTitle>
+              <div className="px-6 pt-2 pb-10 overflow-y-auto">
+                {/* Word Header */}
+                <div className="text-center pb-5 border-b border-[#f3ede4]">
+                  <div className="flex items-baseline justify-center gap-2">
+                    {selectedWord.article && (
+                      <span className="text-[#c45c3e] text-xl font-medium">{selectedWord.article}</span>
+                    )}
+                    <h2 className="text-3xl font-semibold text-[#1a1a1a] tracking-tight">
+                      {selectedWord.word}
+                    </h2>
+                  </div>
+
+                  {selectedWord.partOfSpeech && (
+                    <span className="inline-block mt-3 px-3 py-1 text-xs font-medium text-[#6b6b6b] bg-[#f3ede4] rounded-full">
+                      {selectedWord.partOfSpeech}
+                    </span>
+                  )}
+                </div>
+
+                {/* Translation Card */}
+                {selectedWord.translation && (
+                  <div className="mt-6 bg-gradient-to-br from-[#faf8f5] to-[#f3ede4] rounded-2xl p-5">
+                    <p className="text-[#1a1a1a] text-xl font-medium leading-relaxed">
+                      {selectedWord.translation}
+                    </p>
+                  </div>
                 )}
-                {selectedWord.word}
-              </DialogTitle>
-              {selectedWord.partOfSpeech && (
-                <DialogDescription>{selectedWord.partOfSpeech}</DialogDescription>
-              )}
-            </DialogHeader>
 
-            <div className="space-y-4 py-4 overflow-hidden">
-              {selectedWord.translation && (
-                <div>
-                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
-                    Translation
-                  </p>
-                  <p className="text-[#1a1a1a] break-words">{selectedWord.translation}</p>
+                {/* Example */}
+                {selectedWord.example && (
+                  <div className="mt-6 relative pl-4">
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-[#c45c3e] to-[#c45c3e]/30 rounded-full" />
+                    <p className="text-[#4a4a4a] italic leading-relaxed">
+                      &ldquo;{selectedWord.example}&rdquo;
+                    </p>
+                  </div>
+                )}
+
+                {/* Context */}
+                {selectedWord.contextSentence && (
+                  <div className="mt-6 bg-[#faf8f5] rounded-xl p-4 border border-[#f3ede4]">
+                    <p className="text-xs font-medium text-[#9a9a9a] uppercase tracking-wide mb-2">
+                      From article
+                    </p>
+                    <p className="text-sm text-[#6b6b6b] italic leading-relaxed line-clamp-3">
+                      &ldquo;{selectedWord.contextSentence}&rdquo;
+                    </p>
+                  </div>
+                )}
+
+                {/* Notes */}
+                {selectedWord.notes && (
+                  <div className="mt-6 bg-[#faf8f5] rounded-xl p-4 border border-[#f3ede4]">
+                    <p className="text-xs font-medium text-[#9a9a9a] uppercase tracking-wide mb-2">
+                      Notes
+                    </p>
+                    <p className="text-sm text-[#4a4a4a] leading-relaxed">
+                      {selectedWord.notes}
+                    </p>
+                  </div>
+                )}
+
+                {/* Mastery Progress */}
+                <div className="mt-6 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Badge variant={getMasteryBadge(selectedWord.masteryLevel).variant}>
+                      {getMasteryBadge(selectedWord.masteryLevel).label}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {[0, 1, 2, 3, 4].map((level) => (
+                      <div
+                        key={level}
+                        className={cn(
+                          "w-2 h-2 rounded-full transition-colors",
+                          level < selectedWord.masteryLevel
+                            ? "bg-[#c45c3e]"
+                            : "bg-[#e8dfd3]"
+                        )}
+                      />
+                    ))}
+                  </div>
                 </div>
-              )}
 
-              {selectedWord.example && (
-                <div>
-                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
-                    Example
-                  </p>
-                  <p className="text-[#6b6b6b] italic break-words">{selectedWord.example}</p>
-                </div>
-              )}
-
-              {selectedWord.contextSentence && (
-                <div>
-                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
-                    Context
-                  </p>
-                  <p className="text-[#6b6b6b] italic break-words line-clamp-4">
-                    &ldquo;{selectedWord.contextSentence}&rdquo;
-                  </p>
-                </div>
-              )}
-
-              {selectedWord.notes && (
-                <div>
-                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
-                    Notes
-                  </p>
-                  <p className="text-[#6b6b6b] break-words">{selectedWord.notes}</p>
-                </div>
-              )}
-
-              <div className="flex items-center gap-2 pt-2">
-                <Badge variant={getMasteryBadge(selectedWord.masteryLevel).variant}>
-                  {getMasteryBadge(selectedWord.masteryLevel).label}
-                </Badge>
-                <span className="text-xs text-[#9a9a9a]">
-                  Level {selectedWord.masteryLevel}/5
-                </span>
+                {/* Delete Button - Secondary, at bottom */}
+                <button
+                  onClick={() => setShowDeleteDialog(true)}
+                  className="mt-8 w-full py-3 text-sm font-medium text-[#9a9a9a] hover:text-red-500 transition-colors"
+                >
+                  Remove from vocabulary
+                </button>
               </div>
-            </div>
+            </DrawerContent>
+          )}
+        </Drawer>
+      ) : (
+        <Dialog open={!!selectedWord && !showDeleteDialog} onOpenChange={(open) => !open && setSelectedWord(null)}>
+          {selectedWord && (
+            <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  {selectedWord.article && (
+                    <span className="text-[#c45c3e]">{selectedWord.article}</span>
+                  )}
+                  {selectedWord.word}
+                </DialogTitle>
+                {selectedWord.partOfSpeech && (
+                  <DialogDescription>{selectedWord.partOfSpeech}</DialogDescription>
+                )}
+              </DialogHeader>
 
-            <DialogFooter>
-              <Button
-                variant="destructive"
-                onClick={() => setShowDeleteDialog(true)}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        )}
-      </Dialog>
+              <div className="space-y-4 py-4 overflow-hidden">
+                {selectedWord.translation && (
+                  <div className="bg-gradient-to-br from-[#faf8f5] to-[#f3ede4] rounded-xl p-4">
+                    <p className="text-[#1a1a1a] text-lg font-medium">{selectedWord.translation}</p>
+                  </div>
+                )}
+
+                {selectedWord.example && (
+                  <div className="relative pl-4">
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-[#c45c3e] to-[#c45c3e]/30 rounded-full" />
+                    <p className="text-[#4a4a4a] italic">{selectedWord.example}</p>
+                  </div>
+                )}
+
+                {selectedWord.contextSentence && (
+                  <div className="bg-[#faf8f5] rounded-lg p-3 border border-[#f3ede4]">
+                    <p className="text-xs font-medium text-[#9a9a9a] uppercase tracking-wide mb-1">
+                      Context
+                    </p>
+                    <p className="text-sm text-[#6b6b6b] italic line-clamp-3">
+                      &ldquo;{selectedWord.contextSentence}&rdquo;
+                    </p>
+                  </div>
+                )}
+
+                {selectedWord.notes && (
+                  <div>
+                    <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
+                      Notes
+                    </p>
+                    <p className="text-[#6b6b6b] break-words">{selectedWord.notes}</p>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-2">
+                  <Badge variant={getMasteryBadge(selectedWord.masteryLevel).variant}>
+                    {getMasteryBadge(selectedWord.masteryLevel).label}
+                  </Badge>
+                  <div className="flex items-center gap-1.5">
+                    {[0, 1, 2, 3, 4].map((level) => (
+                      <div
+                        key={level}
+                        className={cn(
+                          "w-2 h-2 rounded-full",
+                          level < selectedWord.masteryLevel
+                            ? "bg-[#c45c3e]"
+                            : "bg-[#e8dfd3]"
+                        )}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter>
+                <button
+                  onClick={() => setShowDeleteDialog(true)}
+                  className="text-sm text-[#9a9a9a] hover:text-red-500 transition-colors"
+                >
+                  Remove from vocabulary
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          )}
+        </Dialog>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

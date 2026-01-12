@@ -13,7 +13,7 @@ export function OriginalToggle({ showOriginal, onToggle }: OriginalToggleProps) 
     <button
       onClick={onToggle}
       className={cn(
-        "fixed bottom-24 right-4 z-40 md:hidden",
+        "fixed bottom-36 right-4 z-40 md:hidden",
         "flex items-center gap-2 px-4 py-3 rounded-full",
         "shadow-lg backdrop-blur-md transition-all duration-200",
         "active:scale-95",

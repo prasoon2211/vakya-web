@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, Sparkles, BookmarkPlus, Check, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
+import { cn } from "@/lib/utils";
 
 interface WordTooltipProps {
   word: string;
@@ -65,7 +65,6 @@ export function WordTooltip({
     }
   }, [word, targetLanguage]);
 
-  // Fetch dictionary result on mount
   useEffect(() => {
     fetchDictionary();
   }, [fetchDictionary]);
@@ -115,7 +114,7 @@ export function WordTooltip({
           example: aiAnalysis?.example || dictionaryResult?.example,
           targetLanguage,
           sourceArticleId: articleId,
-          fetchAIDetails: fetchDetails && !aiAnalysis, // Request AI analysis if we don't have it yet
+          fetchAIDetails: fetchDetails && !aiAnalysis,
         }),
       });
 
@@ -156,195 +155,171 @@ export function WordTooltip({
     }
   };
 
-  return (
-    <div className="w-full max-w-sm min-h-[180px]">
-      {/* Word header */}
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <div>
-          <h3 className="text-xl font-semibold text-[#1a1a1a]">{word}</h3>
-          {dictionaryResult?.phonetic && (
-            <p className="text-sm text-[#6b6b6b]">{dictionaryResult.phonetic}</p>
-          )}
-        </div>
-        {dictionaryResult?.audioUrl && (
-          <button
-            onClick={playAudio}
-            className="p-2 rounded-lg hover:bg-[#f3ede4] transition-colors"
-          >
-            <Volume2 className="h-4 w-4 text-[#6b6b6b]" />
-          </button>
-        )}
-      </div>
+  // Get display data from AI analysis or dictionary
+  const article = aiAnalysis?.article || dictionaryResult?.article;
+  const partOfSpeech = aiAnalysis?.pos || dictionaryResult?.partOfSpeech;
+  const translation = aiAnalysis?.translation || dictionaryResult?.translation;
+  const definition = dictionaryResult?.definition;
+  const example = aiAnalysis?.example || dictionaryResult?.example;
+  const explanation = aiAnalysis?.explanation;
+  const phonetic = dictionaryResult?.phonetic;
+  const audioUrl = dictionaryResult?.audioUrl;
 
+  return (
+    <div className="w-full">
       {/* Loading state */}
       {isLoadingDict && (
-        <div className="flex items-center gap-2 py-4">
-          <Loader2 className="h-4 w-4 animate-spin text-[#6b6b6b]" />
-          <span className="text-sm text-[#6b6b6b]">Looking up...</span>
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="relative">
+            <div className="w-12 h-12 rounded-full border-2 border-[#e8dfd3]" />
+            <div className="absolute inset-0 w-12 h-12 rounded-full border-2 border-[#c45c3e] border-t-transparent animate-spin" />
+          </div>
+          <p className="mt-4 text-sm text-[#9a9a9a]">Looking up word...</p>
         </div>
       )}
 
-      {/* Dictionary result */}
-      {!isLoadingDict && dictionaryResult && !aiAnalysis && (
-        <div className="space-y-3">
-          {dictionaryResult.found ? (
-            <>
-              {/* Badges for article, POS, gender */}
-              <div className="flex flex-wrap gap-2">
-                {dictionaryResult.article && (
-                  <Badge variant="default">{dictionaryResult.article}</Badge>
-                )}
-                {dictionaryResult.partOfSpeech && (
-                  <Badge variant="secondary">{dictionaryResult.partOfSpeech}</Badge>
-                )}
-                {dictionaryResult.gender && (
-                  <Badge variant="outline">{dictionaryResult.gender}</Badge>
-                )}
+      {/* Main content */}
+      {!isLoadingDict && dictionaryResult && (
+        <div className="space-y-6">
+          {/* Word header section */}
+          <div className="text-center pb-4 border-b border-[#f3ede4]">
+            {/* Article + Word */}
+            <div className="flex items-baseline justify-center gap-2">
+              {article && (
+                <span className="text-[#c45c3e] text-lg font-medium">{article}</span>
+              )}
+              <h2 className="text-3xl font-semibold text-[#1a1a1a] tracking-tight">
+                {word}
+              </h2>
+            </div>
+
+            {/* Phonetic + Audio */}
+            <div className="flex items-center justify-center gap-2 mt-2">
+              {phonetic && (
+                <span className="text-[#9a9a9a] text-sm">{phonetic}</span>
+              )}
+              {audioUrl && (
+                <button
+                  onClick={playAudio}
+                  className="p-1.5 rounded-full hover:bg-[#f3ede4] transition-colors group"
+                >
+                  <Volume2 className="h-4 w-4 text-[#9a9a9a] group-hover:text-[#c45c3e] transition-colors" />
+                </button>
+              )}
+            </div>
+
+            {/* Part of speech pill */}
+            {partOfSpeech && (
+              <div className="mt-3">
+                <span className="inline-block px-3 py-1 text-xs font-medium text-[#6b6b6b] bg-[#f3ede4] rounded-full">
+                  {partOfSpeech}
+                </span>
               </div>
-              {/* Translation from local dictionary */}
-              {dictionaryResult.translation && (
-                <div>
-                  <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
-                    Translation
-                  </p>
-                  <p className="text-[#1a1a1a] font-medium text-lg">{dictionaryResult.translation}</p>
-                </div>
-              )}
-              {/* Fallback to definition if no translation */}
-              {!dictionaryResult.translation && dictionaryResult.definition && (
-                <p className="text-sm text-[#4a4a4a]">
-                  {dictionaryResult.definition}
-                </p>
-              )}
-              {dictionaryResult.example && (
-                <p className="text-sm text-[#6b6b6b] italic">
-                  &ldquo;{dictionaryResult.example}&rdquo;
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-[#6b6b6b]">
-              {dictionaryResult.message || "No dictionary entry found"}
-            </p>
+            )}
+          </div>
+
+          {/* Translation - the hero section */}
+          {(translation || definition) && (
+            <div className="bg-gradient-to-br from-[#faf8f5] to-[#f3ede4] rounded-2xl p-5">
+              <p className="text-[#1a1a1a] text-xl font-medium leading-relaxed">
+                {translation || definition}
+              </p>
+            </div>
+          )}
+
+          {/* Not found state */}
+          {!dictionaryResult.found && !translation && !definition && (
+            <div className="text-center py-4">
+              <p className="text-[#9a9a9a]">
+                {dictionaryResult.message || "No dictionary entry found"}
+              </p>
+            </div>
+          )}
+
+          {/* Example */}
+          {example && (
+            <div className="relative pl-4">
+              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-[#c45c3e] to-[#c45c3e]/30 rounded-full" />
+              <p className="text-[#4a4a4a] italic leading-relaxed">
+                &ldquo;{example}&rdquo;
+              </p>
+            </div>
+          )}
+
+          {/* AI Explanation */}
+          {explanation && (
+            <div className="bg-[#faf8f5] rounded-xl p-4 border border-[#f3ede4]">
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles className="h-3.5 w-3.5 text-[#c45c3e]" />
+                <span className="text-xs font-medium text-[#9a9a9a] uppercase tracking-wide">
+                  Note
+                </span>
+              </div>
+              <p className="text-sm text-[#4a4a4a] leading-relaxed">
+                {explanation}
+              </p>
+            </div>
           )}
 
           {/* Action buttons */}
-          <div className="flex gap-2">
-            <Button
-              onClick={handleAnalyzeWithAI}
-              disabled={isLoadingAI}
-              variant="secondary"
-              className="flex-1"
-            >
-              {isLoadingAI ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  {dictionaryResult.found ? "Details" : "Analyze"}
-                </>
-              )}
-            </Button>
-            <Button
-              onClick={() => handleSaveWord(true)}
+          <div className="flex gap-3 pt-2">
+            {!aiAnalysis && (
+              <button
+                onClick={handleAnalyzeWithAI}
+                disabled={isLoadingAI}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl",
+                  "text-sm font-medium transition-all duration-200",
+                  "border border-[#e8dfd3] text-[#6b6b6b]",
+                  "hover:border-[#c45c3e]/30 hover:text-[#c45c3e] hover:bg-[#c45c3e]/5",
+                  "disabled:opacity-50 disabled:cursor-not-allowed"
+                )}
+              >
+                {isLoadingAI ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Analyzing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    <span>{dictionaryResult.found ? "More details" : "AI Analysis"}</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            <button
+              onClick={() => handleSaveWord(!aiAnalysis)}
               disabled={isSaved || isSaving}
-              className="flex-1"
+              className={cn(
+                "flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl",
+                "text-sm font-medium transition-all duration-200",
+                aiAnalysis ? "flex-1" : "",
+                isSaved
+                  ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                  : "bg-[#c45c3e] text-white shadow-lg shadow-[#c45c3e]/20 hover:bg-[#b35537] active:scale-[0.98]",
+                "disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
+              )}
             >
               {isSaved ? (
                 <>
-                  <Check className="h-4 w-4 mr-2" />
-                  Saved
+                  <Check className="h-4 w-4" />
+                  <span>Saved</span>
                 </>
               ) : isSaving ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Saving...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Saving...</span>
                 </>
               ) : (
                 <>
-                  <BookmarkPlus className="h-4 w-4 mr-2" />
-                  Save
+                  <BookmarkPlus className="h-4 w-4" />
+                  <span>Save word</span>
                 </>
               )}
-            </Button>
+            </button>
           </div>
-        </div>
-      )}
-
-      {/* AI Analysis result */}
-      {aiAnalysis && (
-        <div className="space-y-3">
-          {/* Badges */}
-          <div className="flex flex-wrap gap-2">
-            {aiAnalysis.article && (
-              <Badge variant="default">{aiAnalysis.article}</Badge>
-            )}
-            {aiAnalysis.pos && (
-              <Badge variant="secondary">{aiAnalysis.pos}</Badge>
-            )}
-            {aiAnalysis.gender && (
-              <Badge variant="outline">{aiAnalysis.gender}</Badge>
-            )}
-          </div>
-
-          {/* Translation */}
-          <div>
-            <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
-              Translation
-            </p>
-            <p className="text-[#1a1a1a] font-medium text-lg">{aiAnalysis.translation}</p>
-          </div>
-
-          {/* Example */}
-          {aiAnalysis.example && (
-            <div>
-              <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
-                Example
-              </p>
-              <p className="text-sm text-[#4a4a4a] italic">
-                {aiAnalysis.example}
-              </p>
-            </div>
-          )}
-
-          {/* Explanation */}
-          {aiAnalysis.explanation && (
-            <div>
-              <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
-                Notes
-              </p>
-              <p className="text-sm text-[#4a4a4a]">
-                {aiAnalysis.explanation}
-              </p>
-            </div>
-          )}
-
-          {/* Save button */}
-          <Button
-            onClick={() => handleSaveWord(false)}
-            disabled={isSaved || isSaving}
-            className="w-full"
-          >
-            {isSaved ? (
-              <>
-                <Check className="h-4 w-4 mr-2" />
-                Saved
-              </>
-            ) : isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <BookmarkPlus className="h-4 w-4 mr-2" />
-                Save to Vocabulary
-              </>
-            )}
-          </Button>
         </div>
       )}
     </div>

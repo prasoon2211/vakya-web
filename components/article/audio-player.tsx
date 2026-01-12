@@ -118,7 +118,7 @@ export function AudioPlayer({ audioUrl, onClose, hasTimestamps, onReadingModeCli
       </div>
 
       {/* Controls - bottom row */}
-      <div className="flex items-center justify-between px-4 pb-3">
+      <div className="flex items-center justify-between px-4 pt-1 pb-4">
         {/* Left side */}
         <div className="flex items-center gap-2">
           {/* Reading Mode button */}
