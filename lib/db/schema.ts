@@ -128,25 +128,11 @@ export const CEFR_LEVELS: { value: CEFRLevel; label: string; description: string
   { value: "C2", label: "C2 - Mastery", description: "Full native-level fluency" },
 ];
 
+// Supported target languages (limited to those with offline dictionaries)
 export const LANGUAGES = [
   "German",
   "Spanish",
   "French",
-  "Italian",
-  "Portuguese",
-  "Dutch",
-  "Russian",
-  "Japanese",
-  "Korean",
-  "Chinese",
-  "Arabic",
-  "Hindi",
-  "Turkish",
-  "Polish",
-  "Swedish",
-  "Norwegian",
-  "Danish",
-  "Finnish",
-  "Greek",
-  "Czech",
-];
+] as const;
+
+export type TargetLanguage = typeof LANGUAGES[number];

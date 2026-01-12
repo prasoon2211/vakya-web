@@ -1,78 +1,77 @@
 /**
- * Script to parse the TU Chemnitz German-English dictionary
- * and convert it to a compact JSON format for fast lookups.
+ * Script to parse dictionaries for German, Spanish, and French
+ * and convert them to compact JSON format for fast lookups.
  *
  * Run with: npx tsx scripts/parse-dictionary.ts
  *
- * This script will:
- * 1. Download de-en.txt.gz if not present
- * 2. Extract it if needed
- * 3. Parse and convert to JSON
+ * Sources:
+ * - German: TU Chemnitz (GPL) - ~310k words
+ * - Spanish: MUSE/Facebook Research - ~113k pairs
+ * - French: MUSE/Facebook Research - ~113k pairs
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 
-const DICT_URL = 'https://ftp.tu-chemnitz.de/pub/Local/urz/ding/de-en/de-en.txt.gz';
 const DICT_DIR = path.join(__dirname, '../lib/dictionary');
-const GZ_PATH = path.join(DICT_DIR, 'de-en.txt.gz');
-const TXT_PATH = path.join(DICT_DIR, 'de-en.txt');
-const JSON_PATH = path.join(DICT_DIR, 'de-en.json');
 
-// Download and extract dictionary if needed
-function ensureDictionary() {
-  // Ensure directory exists
+// Dictionary sources
+const SOURCES = {
+  german: {
+    url: 'https://ftp.tu-chemnitz.de/pub/Local/urz/ding/de-en/de-en.txt.gz',
+    gzPath: path.join(DICT_DIR, 'de-en.txt.gz'),
+    txtPath: path.join(DICT_DIR, 'de-en.txt'),
+    jsonPath: path.join(DICT_DIR, 'de-en.json'),
+    format: 'chemnitz',
+  },
+  spanish: {
+    url: 'https://dl.fbaipublicfiles.com/arrival/dictionaries/es-en.txt',
+    txtPath: path.join(DICT_DIR, 'es-en.txt'),
+    jsonPath: path.join(DICT_DIR, 'es-en.json'),
+    format: 'muse',
+  },
+  french: {
+    url: 'https://dl.fbaipublicfiles.com/arrival/dictionaries/fr-en.txt',
+    txtPath: path.join(DICT_DIR, 'fr-en.txt'),
+    jsonPath: path.join(DICT_DIR, 'fr-en.json'),
+    format: 'muse',
+  },
+};
+
+interface DictEntry {
+  word: string;       // Original word in target language
+  en: string;         // English translation
+  pos?: string;       // Part of speech
+  article?: string;   // Article (for German nouns)
+  gender?: string;    // Gender (for German nouns)
+}
+
+// Ensure directory exists
+function ensureDir() {
   if (!fs.existsSync(DICT_DIR)) {
     fs.mkdirSync(DICT_DIR, { recursive: true });
   }
-
-  // If JSON already exists and is recent, skip
-  if (fs.existsSync(JSON_PATH)) {
-    const stats = fs.statSync(JSON_PATH);
-    const ageInDays = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60 * 24);
-    if (ageInDays < 30) {
-      console.log('[Dictionary] JSON file exists and is recent, skipping generation');
-      return false; // Don't need to regenerate
-    }
-  }
-
-  // Download if needed
-  if (!fs.existsSync(TXT_PATH) && !fs.existsSync(GZ_PATH)) {
-    console.log('[Dictionary] Downloading from TU Chemnitz...');
-    execSync(`curl -sL "${DICT_URL}" -o "${GZ_PATH}"`, { stdio: 'inherit' });
-  }
-
-  // Extract if needed
-  if (!fs.existsSync(TXT_PATH) && fs.existsSync(GZ_PATH)) {
-    console.log('[Dictionary] Extracting...');
-    execSync(`gunzip -f "${GZ_PATH}"`, { stdio: 'inherit' });
-  }
-
-  return true; // Need to generate
 }
 
-interface DictEntry {
-  de: string;           // German word (normalized)
-  en: string;           // Primary English translation
-  pos?: string;         // Part of speech
-  article?: string;     // Article (der/die/das)
-  gender?: string;      // Gender (m/f/n)
-  full?: string;        // Full entry for complex lookups
+// Check if file needs regeneration
+function needsRegeneration(jsonPath: string): boolean {
+  if (!fs.existsSync(jsonPath)) return true;
+  const stats = fs.statSync(jsonPath);
+  const ageInDays = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60 * 24);
+  return ageInDays > 30;
 }
 
-// Parse grammar annotations like {m}, {f}, {n}, {pl}, {adj}, {v}, etc.
+// Parse grammar annotations from TU Chemnitz format
 function parseGrammar(text: string): { clean: string; pos?: string; article?: string; gender?: string } {
   const result: { clean: string; pos?: string; article?: string; gender?: string } = {
     clean: text,
   };
 
-  // Extract grammar info from curly braces
   const grammarMatch = text.match(/\{([^}]+)\}/);
   if (grammarMatch) {
     const grammar = grammarMatch[1].toLowerCase();
 
-    // Gender/article detection
     if (grammar === 'm' || grammar.includes('m;')) {
       result.gender = 'masculine';
       result.article = 'der';
@@ -103,76 +102,63 @@ function parseGrammar(text: string): { clean: string; pos?: string; article?: st
       result.pos = 'interjection';
     }
 
-    // Remove grammar from clean text
     result.clean = text.replace(/\s*\{[^}]+\}/g, '').trim();
   }
 
   return result;
 }
 
-// Normalize a word for lookup (lowercase, remove special chars)
+// Normalize word for lookup key
 function normalizeWord(word: string): string {
   return word
     .toLowerCase()
     .trim()
-    // Keep umlauts and ß
     .replace(/[^\p{L}\p{M}]/gu, '');
 }
 
-// Extract the primary word from a compound entry
+// Extract primary word from compound entry
 function extractPrimaryWord(entry: string): string {
-  // Remove anything in parentheses or brackets
   let word = entry.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
-  // Remove grammar annotations
   word = word.replace(/\{[^}]*\}/g, '');
-  // Take first word if multiple separated by ;
   word = word.split(';')[0];
-  // Take first word if multiple separated by ,
   word = word.split(',')[0];
-  // Clean up
-  word = word.trim();
-  return word;
+  return word.trim();
 }
 
-function parseDictionary() {
-  // Ensure dictionary is downloaded and extracted
-  const needsGeneration = ensureDictionary();
-  if (!needsGeneration) {
-    return;
+// Parse TU Chemnitz German dictionary
+function parseGermanDictionary(): Map<string, DictEntry> {
+  const source = SOURCES.german;
+  const dictionary = new Map<string, DictEntry>();
+
+  // Download if needed
+  if (!fs.existsSync(source.txtPath)) {
+    if (!fs.existsSync(source.gzPath)) {
+      console.log('[German] Downloading from TU Chemnitz...');
+      execSync(`curl -sL "${source.url}" -o "${source.gzPath}"`, { stdio: 'inherit' });
+    }
+    console.log('[German] Extracting...');
+    execSync(`gunzip -f "${source.gzPath}"`, { stdio: 'inherit' });
   }
 
-  console.log('[Dictionary] Reading dictionary file...');
-  const content = fs.readFileSync(TXT_PATH, 'utf-8');
+  console.log('[German] Parsing dictionary...');
+  const content = fs.readFileSync(source.txtPath, 'utf-8');
   const lines = content.split('\n');
 
-  const dictionary: Map<string, DictEntry> = new Map();
-  let processed = 0;
-  let skipped = 0;
-
   for (const line of lines) {
-    // Skip comments and empty lines
-    if (line.startsWith('#') || !line.trim()) {
-      continue;
-    }
+    if (line.startsWith('#') || !line.trim()) continue;
 
-    // Split on ::
     const parts = line.split('::');
-    if (parts.length !== 2) {
-      skipped++;
-      continue;
-    }
+    if (parts.length !== 2) continue;
 
     const germanPart = parts[0].trim();
     const englishPart = parts[1].trim();
 
-    // Handle multiple entries separated by |
     const germanEntries = germanPart.split('|').map(e => e.trim());
     const englishEntries = englishPart.split('|').map(e => e.trim());
 
-    // Process each German entry
     for (let i = 0; i < germanEntries.length; i++) {
       const germanEntry = germanEntries[i];
-      const englishEntry = englishEntries[i] || englishEntries[0]; // Fallback to first translation
+      const englishEntry = englishEntries[i] || englishEntries[0];
 
       if (!germanEntry || !englishEntry) continue;
 
@@ -182,61 +168,115 @@ function parseDictionary() {
 
       if (!normalizedKey || normalizedKey.length < 2) continue;
 
-      // Extract clean English translation
       let englishClean = englishEntry
-        .replace(/\{[^}]*\}/g, '')  // Remove grammar
-        .replace(/\([^)]*\)/g, '')   // Remove parenthetical notes
-        .replace(/\[[^\]]*\]/g, '')  // Remove brackets
-        .split(';')[0]               // Take first meaning
-        .split(',')[0]               // Take first variant
+        .replace(/\{[^}]*\}/g, '')
+        .replace(/\([^)]*\)/g, '')
+        .replace(/\[[^\]]*\]/g, '')
+        .split(';')[0]
+        .split(',')[0]
         .trim();
 
-      // Skip if English is empty or too short
       if (!englishClean || englishClean.length < 2) continue;
 
-      // Only add if not already present or if this entry has more info
       const existing = dictionary.get(normalizedKey);
       if (!existing || (pos && !existing.pos) || (article && !existing.article)) {
         dictionary.set(normalizedKey, {
-          de: primaryWord,
+          word: primaryWord,
           en: englishClean,
           ...(pos && { pos }),
           ...(article && { article }),
           ...(gender && { gender }),
         });
       }
-
-      processed++;
     }
   }
 
-  console.log(`Processed ${processed} entries, skipped ${skipped}`);
-  console.log(`Unique words: ${dictionary.size}`);
+  return dictionary;
+}
 
-  // Convert to object for JSON
+// Parse MUSE format dictionary (Spanish or French)
+function parseMUSEDictionary(language: 'spanish' | 'french'): Map<string, DictEntry> {
+  const source = SOURCES[language];
+  const dictionary = new Map<string, DictEntry>();
+
+  // Download if needed
+  if (!fs.existsSync(source.txtPath)) {
+    console.log(`[${language}] Downloading from MUSE...`);
+    execSync(`curl -sL "${source.url}" -o "${source.txtPath}"`, { stdio: 'inherit' });
+  }
+
+  console.log(`[${language}] Parsing dictionary...`);
+  const content = fs.readFileSync(source.txtPath, 'utf-8');
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+
+    // MUSE format: "sourceWord targetWord" (space-separated)
+    const parts = line.split(/\s+/);
+    if (parts.length < 2) continue;
+
+    const sourceWord = parts[0].trim();
+    const targetWord = parts[1].trim();
+
+    if (!sourceWord || !targetWord) continue;
+
+    const normalizedKey = normalizeWord(sourceWord);
+    if (!normalizedKey || normalizedKey.length < 2) continue;
+
+    // Only keep first translation for each word (MUSE has multiple lines for same word)
+    if (!dictionary.has(normalizedKey)) {
+      dictionary.set(normalizedKey, {
+        word: sourceWord,
+        en: targetWord,
+      });
+    }
+  }
+
+  return dictionary;
+}
+
+// Save dictionary to JSON
+function saveDictionary(dictionary: Map<string, DictEntry>, jsonPath: string, language: string) {
   const dictObject: Record<string, DictEntry> = {};
   dictionary.forEach((value, key) => {
     dictObject[key] = value;
   });
 
-  // Write to JSON file
-  console.log('Writing JSON file...');
-  fs.writeFileSync(JSON_PATH, JSON.stringify(dictObject), 'utf-8');
-
-  const stats = fs.statSync(JSON_PATH);
-  console.log(`Output file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
-
-  // Show some sample entries
-  console.log('\n[Dictionary] Sample entries:');
-  const samples = ['haus', 'gehen', 'schön', 'buch', 'wasser', 'liebe', 'zeit'];
-  for (const sample of samples) {
-    const entry = dictionary.get(sample);
-    if (entry) {
-      console.log(`  ${sample}: ${JSON.stringify(entry)}`);
-    }
-  }
-
-  console.log('\n[Dictionary] Done!');
+  fs.writeFileSync(jsonPath, JSON.stringify(dictObject), 'utf-8');
+  const stats = fs.statSync(jsonPath);
+  console.log(`[${language}] Saved ${dictionary.size} words (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
 }
 
-parseDictionary();
+// Main function
+async function main() {
+  ensureDir();
+
+  // German dictionary
+  if (needsRegeneration(SOURCES.german.jsonPath)) {
+    const germanDict = parseGermanDictionary();
+    saveDictionary(germanDict, SOURCES.german.jsonPath, 'German');
+  } else {
+    console.log('[German] Dictionary up to date, skipping');
+  }
+
+  // Spanish dictionary
+  if (needsRegeneration(SOURCES.spanish.jsonPath)) {
+    const spanishDict = parseMUSEDictionary('spanish');
+    saveDictionary(spanishDict, SOURCES.spanish.jsonPath, 'Spanish');
+  } else {
+    console.log('[Spanish] Dictionary up to date, skipping');
+  }
+
+  // French dictionary
+  if (needsRegeneration(SOURCES.french.jsonPath)) {
+    const frenchDict = parseMUSEDictionary('french');
+    saveDictionary(frenchDict, SOURCES.french.jsonPath, 'French');
+  } else {
+    console.log('[French] Dictionary up to date, skipping');
+  }
+
+  console.log('\n[Dictionary] All dictionaries ready!');
+}
+
+main().catch(console.error);

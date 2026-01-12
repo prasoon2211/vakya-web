@@ -1,8 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { lookupWord, type DictionaryEntry } from "@/lib/dictionary/lookup";
+import { lookupWord, isSupportedLanguage, type DictionaryEntry, type SupportedLanguage } from "@/lib/dictionary/lookup";
 
-// GET - Dictionary lookup (German-English only, uses local dictionary)
+// GET - Dictionary lookup (supports German, Spanish, French)
 export async function GET(request: Request) {
   try {
     const { userId } = await auth();
@@ -18,17 +18,17 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Word is required" }, { status: 400 });
     }
 
-    // Only German is supported for now
-    if (language !== "German") {
+    // Check if language is supported
+    if (!isSupportedLanguage(language)) {
       return NextResponse.json({
         found: false,
         word,
-        message: "Only German is supported at this time",
+        message: `Language "${language}" is not supported. Supported: German, Spanish, French`,
       });
     }
 
-    // Use local TU Chemnitz dictionary for instant lookup
-    const entry: DictionaryEntry | null = lookupWord(word);
+    // Use local dictionary for instant lookup
+    const entry: DictionaryEntry | null = lookupWord(word, language as SupportedLanguage);
 
     if (!entry) {
       return NextResponse.json({
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       found: true,
-      word: entry.de,
+      word: entry.word,
       translation: entry.en,
       partOfSpeech: entry.pos || null,
       article: entry.article || null,

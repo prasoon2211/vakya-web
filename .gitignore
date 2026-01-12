@@ -40,6 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Dictionary files (generated from source)
-lib/dictionary/*.json
-lib/dictionary/de-en.txt
+# Dictionary source files (downloaded, not needed in repo)
+lib/dictionary/*.txt

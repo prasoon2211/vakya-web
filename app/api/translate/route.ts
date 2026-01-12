@@ -181,23 +181,93 @@ function smartChunkContent(content: string): string[] {
   return merged.filter(chunk => chunk.trim().length > 0);
 }
 
+// CEFR level-specific translation guidelines
+const CEFR_GUIDELINES: Record<string, string> = {
+  A1: `A1 (Beginner) - STRICT SIMPLIFICATION REQUIRED:
+• Maximum 8-10 words per sentence
+• ONLY simple main clauses (Subject-Verb-Object)
+• NO subordinate clauses (no weil, dass, wenn, obwohl, etc.)
+• Present tense ONLY
+• Connectors limited to: und, oder, aber
+• NO passive voice, NO relative clauses
+• Break every complex sentence into multiple simple ones
+• Use only the 500 most common words`,
+
+  A2: `A2 (Elementary) - SIGNIFICANT SIMPLIFICATION:
+• Maximum 12-15 words per sentence
+• At most ONE subordinate clause per sentence
+• Tenses: present + Perfekt (simple past)
+• Allowed connectors: und, oder, aber, weil, dass, wenn
+• NO passive voice
+• Simple relative clauses (der/die/das) sparingly
+• Break long sentences into 2-3 shorter ones
+• Use common everyday vocabulary (~1500 words)`,
+
+  B1: `B1 (Intermediate) - MODERATE SIMPLIFICATION:
+• Maximum 18-20 words per sentence
+• Up to TWO subordinate clauses per sentence
+• All common tenses including future
+• Connectors: weil, dass, wenn, obwohl, damit, nachdem, bevor
+• Simple passive voice acceptable
+• Relative clauses acceptable
+• Can express opinions and reasoning
+• Break very long sentences (3+ clauses) into shorter ones
+• Intermediate vocabulary (~3000 words)`,
+
+  B2: `B2 (Upper-Intermediate) - LIGHT SIMPLIFICATION:
+• Maximum 25 words per sentence
+• Complex sentence structures allowed
+• All tenses including Konjunktiv II
+• Idiomatic expressions acceptable
+• Passive voice freely used
+• Only break extremely long sentences (4+ nested clauses)
+• Upper-intermediate vocabulary, some abstract terms`,
+
+  C1: `C1 (Advanced) - MINIMAL CHANGES:
+• Near-native sentence complexity allowed
+• All grammatical structures permitted
+• Nuanced and sophisticated expression
+• Only simplify if truly incomprehensible
+• Advanced vocabulary, abstract concepts OK`,
+
+  C2: `C2 (Mastery) - PRESERVE ORIGINAL STYLE:
+• Native-level complexity preserved
+• Literary and journalistic style maintained
+• Minimal intervention, translate naturally
+• Full vocabulary range`,
+};
+
 // Translate a single chunk of text
 async function translateChunk(
   text: string,
   targetLanguage: string,
   cefrLevel: string
 ): Promise<TranslationBlock> {
-  const systemPrompt = `You are a language learning assistant. Translate text to ${targetLanguage} at CEFR level ${cefrLevel}.
+  const levelGuidelines = CEFR_GUIDELINES[cefrLevel] || CEFR_GUIDELINES.B1;
 
-CEFR ${cefrLevel} guidelines:
-- A1: Basic vocabulary (500 words), simple present, short sentences
-- A2: Elementary vocabulary, simple past/future, compound sentences
-- B1: Intermediate vocabulary, all common tenses, opinions allowed
-- B2: Upper-intermediate, complex sentences, idioms acceptable
-- C1: Advanced vocabulary, nuanced expression
-- C2: Native-level expression
+  const systemPrompt = `You are an expert language learning translator. Your task is to translate text into ${targetLanguage} that is TRULY appropriate for a ${cefrLevel} learner.
 
-Preserve paragraph structure (blank lines). Return JSON: {"original": "input text", "translated": "your translation"}`;
+CRITICAL: Sentence structure complexity matters MORE than vocabulary. A learner may know words but struggle with complex grammar. Your job is to make the text COMPREHENSIBLE at their level, not just use simple words.
+
+## ${levelGuidelines}
+
+## Translation Strategy:
+1. First understand the core meaning of each sentence
+2. Restructure complex sentences to fit the level constraints
+3. Break long sentences into shorter ones when needed
+4. Maintain the essential information and narrative flow
+5. Use appropriate connectors for the level to maintain coherence
+
+## Examples of Simplification:
+Original (complex): "Obwohl er die Sprache gut beherrschte, fiel es ihm schwer, den Dialekt zu verstehen."
+
+A1 version: "Er sprach die Sprache gut. Aber der Dialekt war schwer. Er verstand ihn nicht."
+A2 version: "Er sprach die Sprache gut. Aber er verstand den Dialekt nicht, weil er schwer war."
+B1 version: "Obwohl er die Sprache gut sprach, war der Dialekt schwer zu verstehen."
+B2+: Keep closer to original structure.
+
+Preserve paragraph breaks (blank lines between paragraphs).
+Return JSON: {"original": "input text", "translated": "your translation"}`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-5-mini",
