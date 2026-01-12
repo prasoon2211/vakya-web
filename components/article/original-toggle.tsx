@@ -16,7 +16,7 @@ export function OriginalToggle({ showOriginal, onToggle, hasAudioPlayer = false 
       className={cn(
         "fixed right-4 z-40 md:hidden",
         // Position higher when audio player is shown (it's taller), lower for just the generate button
-        hasAudioPlayer ? "bottom-32" : "bottom-20",
+        hasAudioPlayer ? "bottom-32" : "bottom-24",
         "flex items-center gap-2 px-4 py-3 rounded-full",
         "shadow-lg backdrop-blur-md transition-all duration-200",
         "active:scale-95",

@@ -43,9 +43,9 @@ function WordSpan({ word, display, sentence, targetLanguage, articleId }: WordSp
             {display}
           </span>
         </DrawerTrigger>
-        <DrawerContent className="max-h-[80vh]">
+        <DrawerContent className="max-h-[60vh]">
           <DrawerTitle className="sr-only">Word Definition</DrawerTitle>
-          <div className="px-6 pt-2 overflow-y-auto flex-1" style={{ paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom, 2.5rem))' }}>
+          <div className="px-4 pt-1 overflow-y-auto flex-1" style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 1rem))' }}>
             <WordTooltip
               word={word}
               contextSentence={sentence}

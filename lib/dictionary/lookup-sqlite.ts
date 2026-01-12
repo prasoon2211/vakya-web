@@ -162,17 +162,31 @@ function parseRow(row: Record<string, unknown>, language: SupportedLanguage): Di
   };
 }
 
+// Maximum recursion depth for following inflection references
+const MAX_LOOKUP_DEPTH = 3;
+
 /**
  * Look up a word in the dictionary
  *
  * @param word - The word to look up
  * @param language - The target language
+ * @param depth - Internal: current recursion depth (do not pass externally)
+ * @param visitedWords - Internal: words already visited to prevent loops
  * @returns Dictionary entry if found, null otherwise
  */
-export function lookupWord(word: string, language: SupportedLanguage): DictionaryEntry | null {
+export function lookupWord(
+  word: string,
+  language: SupportedLanguage,
+  depth: number = 0,
+  visitedWords: Set<string> = new Set()
+): DictionaryEntry | null {
   try {
     const normalizedWord = word.toLowerCase().trim();
     if (!normalizedWord || normalizedWord.length < 1) return null;
+
+    // Prevent infinite loops
+    if (visitedWords.has(normalizedWord)) return null;
+    visitedWords.add(normalizedWord);
 
     // Direct lookup
     const row = getLookupStmt(language).get(normalizedWord) as Record<string, unknown> | undefined;
@@ -181,10 +195,11 @@ export function lookupWord(word: string, language: SupportedLanguage): Dictionar
       const entry = parseRow(row, language);
 
       // If this is just a reference to another form, try to find the base word
-      if (entry.definition && isInflectionReference(entry.definition)) {
+      // But only recurse if we haven't hit the depth limit
+      if (entry.definition && isInflectionReference(entry.definition) && depth < MAX_LOOKUP_DEPTH) {
         const baseWord = extractBaseWord(entry.definition);
         if (baseWord && baseWord.toLowerCase() !== normalizedWord) {
-          const baseEntry = lookupWord(baseWord, language);
+          const baseEntry = lookupWord(baseWord, language, depth + 1, visitedWords);
           if (baseEntry && baseEntry.definition && !isInflectionReference(baseEntry.definition)) {
             return {
               ...baseEntry,
