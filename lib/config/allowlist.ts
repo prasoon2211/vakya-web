@@ -6,6 +6,7 @@ export const ALLOWED_LIST: string[] = [
   // Add allowed emails or domains here
   "withpretzel.com",
   "prasoon2211@gmail.com",
+  "c.scalisi22@gmail.com",
 ];
 
 export function isEmailAllowed(email: string | null | undefined): boolean {
