@@ -2,9 +2,9 @@
  * Multi-language Dictionary Lookup Module
  *
  * Supports:
- * - German-English (TU Chemnitz, GPL, ~310k words)
- * - Spanish-English (MUSE/Facebook Research, ~113k words)
- * - French-English (MUSE/Facebook Research, ~113k words)
+ * - German-English (MUSE/Facebook Research, ~102k words)
+ * - Spanish-English (MUSE/Facebook Research, ~102k words)
+ * - French-English (MUSE/Facebook Research, ~102k words)
  *
  * Dictionaries are loaded on-demand and kept in memory for fast lookups.
  */
@@ -15,9 +15,6 @@ import * as path from 'path';
 export interface DictionaryEntry {
   word: string;       // Original word in target language
   en: string;         // English translation
-  pos?: string;       // Part of speech
-  article?: string;   // Article (der/die/das for German)
-  gender?: string;    // Gender (masculine/feminine/neuter for German)
 }
 
 export type SupportedLanguage = 'German' | 'Spanish' | 'French';

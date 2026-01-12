@@ -5,9 +5,9 @@
  * Run with: npx tsx scripts/parse-dictionary.ts
  *
  * Sources:
- * - German: TU Chemnitz (GPL) - ~310k words
- * - Spanish: MUSE/Facebook Research - ~113k pairs
- * - French: MUSE/Facebook Research - ~113k pairs
+ * - German: MUSE/Facebook Research - ~102k pairs
+ * - Spanish: MUSE/Facebook Research - ~102k pairs
+ * - French: MUSE/Facebook Research - ~102k pairs
  */
 
 import * as fs from 'fs';
@@ -16,35 +16,28 @@ import { execSync } from 'child_process';
 
 const DICT_DIR = path.join(__dirname, '../lib/dictionary');
 
-// Dictionary sources
+// Dictionary sources - all from Facebook MUSE
 const SOURCES = {
   german: {
-    url: 'https://ftp.tu-chemnitz.de/pub/Local/urz/ding/de-en/de-en.txt.gz',
-    gzPath: path.join(DICT_DIR, 'de-en.txt.gz'),
+    url: 'https://dl.fbaipublicfiles.com/arrival/dictionaries/de-en.txt',
     txtPath: path.join(DICT_DIR, 'de-en.txt'),
     jsonPath: path.join(DICT_DIR, 'de-en.json'),
-    format: 'chemnitz',
   },
   spanish: {
     url: 'https://dl.fbaipublicfiles.com/arrival/dictionaries/es-en.txt',
     txtPath: path.join(DICT_DIR, 'es-en.txt'),
     jsonPath: path.join(DICT_DIR, 'es-en.json'),
-    format: 'muse',
   },
   french: {
     url: 'https://dl.fbaipublicfiles.com/arrival/dictionaries/fr-en.txt',
     txtPath: path.join(DICT_DIR, 'fr-en.txt'),
     jsonPath: path.join(DICT_DIR, 'fr-en.json'),
-    format: 'muse',
   },
 };
 
 interface DictEntry {
   word: string;       // Original word in target language
   en: string;         // English translation
-  pos?: string;       // Part of speech
-  article?: string;   // Article (for German nouns)
-  gender?: string;    // Gender (for German nouns)
 }
 
 // Ensure directory exists
@@ -62,52 +55,6 @@ function needsRegeneration(jsonPath: string): boolean {
   return ageInDays > 30;
 }
 
-// Parse grammar annotations from TU Chemnitz format
-function parseGrammar(text: string): { clean: string; pos?: string; article?: string; gender?: string } {
-  const result: { clean: string; pos?: string; article?: string; gender?: string } = {
-    clean: text,
-  };
-
-  const grammarMatch = text.match(/\{([^}]+)\}/);
-  if (grammarMatch) {
-    const grammar = grammarMatch[1].toLowerCase();
-
-    if (grammar === 'm' || grammar.includes('m;')) {
-      result.gender = 'masculine';
-      result.article = 'der';
-      result.pos = 'noun';
-    } else if (grammar === 'f' || grammar.includes('f;')) {
-      result.gender = 'feminine';
-      result.article = 'die';
-      result.pos = 'noun';
-    } else if (grammar === 'n' || grammar.includes('n;')) {
-      result.gender = 'neuter';
-      result.article = 'das';
-      result.pos = 'noun';
-    } else if (grammar === 'pl') {
-      result.pos = 'noun';
-    } else if (grammar === 'adj' || grammar === 'adj.') {
-      result.pos = 'adjective';
-    } else if (grammar === 'adv' || grammar === 'adv.') {
-      result.pos = 'adverb';
-    } else if (grammar === 'v' || grammar === 'vt' || grammar === 'vi' || grammar.includes('vt;') || grammar.includes('vi;')) {
-      result.pos = 'verb';
-    } else if (grammar === 'prep' || grammar === 'prp' || grammar === 'prp.') {
-      result.pos = 'preposition';
-    } else if (grammar === 'conj') {
-      result.pos = 'conjunction';
-    } else if (grammar === 'pron') {
-      result.pos = 'pronoun';
-    } else if (grammar === 'interj') {
-      result.pos = 'interjection';
-    }
-
-    result.clean = text.replace(/\s*\{[^}]+\}/g, '').trim();
-  }
-
-  return result;
-}
-
 // Normalize word for lookup key
 function normalizeWord(word: string): string {
   return word
@@ -116,86 +63,8 @@ function normalizeWord(word: string): string {
     .replace(/[^\p{L}\p{M}]/gu, '');
 }
 
-// Extract primary word from compound entry
-function extractPrimaryWord(entry: string): string {
-  let word = entry.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
-  word = word.replace(/\{[^}]*\}/g, '');
-  word = word.split(';')[0];
-  word = word.split(',')[0];
-  return word.trim();
-}
-
-// Parse TU Chemnitz German dictionary
-function parseGermanDictionary(): Map<string, DictEntry> {
-  const source = SOURCES.german;
-  const dictionary = new Map<string, DictEntry>();
-
-  // Download if needed
-  if (!fs.existsSync(source.txtPath)) {
-    if (!fs.existsSync(source.gzPath)) {
-      console.log('[German] Downloading from TU Chemnitz...');
-      execSync(`curl -sL "${source.url}" -o "${source.gzPath}"`, { stdio: 'inherit' });
-    }
-    console.log('[German] Extracting...');
-    execSync(`gunzip -f "${source.gzPath}"`, { stdio: 'inherit' });
-  }
-
-  console.log('[German] Parsing dictionary...');
-  const content = fs.readFileSync(source.txtPath, 'utf-8');
-  const lines = content.split('\n');
-
-  for (const line of lines) {
-    if (line.startsWith('#') || !line.trim()) continue;
-
-    const parts = line.split('::');
-    if (parts.length !== 2) continue;
-
-    const germanPart = parts[0].trim();
-    const englishPart = parts[1].trim();
-
-    const germanEntries = germanPart.split('|').map(e => e.trim());
-    const englishEntries = englishPart.split('|').map(e => e.trim());
-
-    for (let i = 0; i < germanEntries.length; i++) {
-      const germanEntry = germanEntries[i];
-      const englishEntry = englishEntries[i] || englishEntries[0];
-
-      if (!germanEntry || !englishEntry) continue;
-
-      const { clean: germanClean, pos, article, gender } = parseGrammar(germanEntry);
-      const primaryWord = extractPrimaryWord(germanClean);
-      const normalizedKey = normalizeWord(primaryWord);
-
-      if (!normalizedKey || normalizedKey.length < 2) continue;
-
-      let englishClean = englishEntry
-        .replace(/\{[^}]*\}/g, '')
-        .replace(/\([^)]*\)/g, '')
-        .replace(/\[[^\]]*\]/g, '')
-        .split(';')[0]
-        .split(',')[0]
-        .trim();
-
-      if (!englishClean || englishClean.length < 2) continue;
-
-      const existing = dictionary.get(normalizedKey);
-      if (!existing || (pos && !existing.pos) || (article && !existing.article)) {
-        dictionary.set(normalizedKey, {
-          word: primaryWord,
-          en: englishClean,
-          ...(pos && { pos }),
-          ...(article && { article }),
-          ...(gender && { gender }),
-        });
-      }
-    }
-  }
-
-  return dictionary;
-}
-
-// Parse MUSE format dictionary (Spanish or French)
-function parseMUSEDictionary(language: 'spanish' | 'french'): Map<string, DictEntry> {
+// Parse MUSE format dictionary
+function parseMUSEDictionary(language: 'german' | 'spanish' | 'french'): Map<string, DictEntry> {
   const source = SOURCES[language];
   const dictionary = new Map<string, DictEntry>();
 
@@ -252,28 +121,18 @@ function saveDictionary(dictionary: Map<string, DictEntry>, jsonPath: string, la
 async function main() {
   ensureDir();
 
-  // German dictionary
-  if (needsRegeneration(SOURCES.german.jsonPath)) {
-    const germanDict = parseGermanDictionary();
-    saveDictionary(germanDict, SOURCES.german.jsonPath, 'German');
-  } else {
-    console.log('[German] Dictionary up to date, skipping');
-  }
+  const languages = ['german', 'spanish', 'french'] as const;
 
-  // Spanish dictionary
-  if (needsRegeneration(SOURCES.spanish.jsonPath)) {
-    const spanishDict = parseMUSEDictionary('spanish');
-    saveDictionary(spanishDict, SOURCES.spanish.jsonPath, 'Spanish');
-  } else {
-    console.log('[Spanish] Dictionary up to date, skipping');
-  }
+  for (const lang of languages) {
+    const source = SOURCES[lang];
+    const displayName = lang.charAt(0).toUpperCase() + lang.slice(1);
 
-  // French dictionary
-  if (needsRegeneration(SOURCES.french.jsonPath)) {
-    const frenchDict = parseMUSEDictionary('french');
-    saveDictionary(frenchDict, SOURCES.french.jsonPath, 'French');
-  } else {
-    console.log('[French] Dictionary up to date, skipping');
+    if (needsRegeneration(source.jsonPath)) {
+      const dict = parseMUSEDictionary(lang);
+      saveDictionary(dict, source.jsonPath, displayName);
+    } else {
+      console.log(`[${displayName}] Dictionary up to date, skipping`);
+    }
   }
 
   console.log('\n[Dictionary] All dictionaries ready!');
