@@ -14,7 +14,8 @@
     "db:studio": "drizzle-kit studio",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "dict:build": "tsx scripts/parse-dictionary.ts"
+    "dict:build": "tsx scripts/parse-dictionary.ts",
+    "dict:enhance-german": "tsx lib/dictionary/enhance-german-with-tu-chemnitz.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.964.0",

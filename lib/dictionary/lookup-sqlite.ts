@@ -34,6 +34,13 @@ export interface DictionaryEntry {
   forms: string | null;      // Related forms (conjugations, etc.)
   ipa: string | null;        // IPA pronunciation
   audioUrl: string | null;   // Wikimedia audio URL
+  // Enhanced German fields from TU Chemnitz
+  gender: 'm' | 'f' | 'n' | null;      // m=masculine, f=feminine, n=neuter
+  article: 'der' | 'die' | 'das' | null; // German article
+  plural: string | null;               // Plural form
+  genitive: string | null;             // Genitive form
+  pastParticiple: string | null;       // For verbs
+  preterite: string | null;            // For verbs
 }
 
 // Lazy-load database connections (one per language)
@@ -85,7 +92,13 @@ function getLookupStmt(language: SupportedLanguage): Database.Statement {
         definitions_json as definitionsJson,
         forms,
         ipa,
-        audio
+        audio,
+        gender,
+        article,
+        plural,
+        genitive,
+        past_participle as pastParticiple,
+        preterite
       FROM words
       WHERE word_lower = ?
       LIMIT 1
@@ -106,7 +119,13 @@ function getLookupByFormsStmt(language: SupportedLanguage): Database.Statement {
         definitions_json as definitionsJson,
         forms,
         ipa,
-        audio
+        audio,
+        gender,
+        article,
+        plural,
+        genitive,
+        past_participle as pastParticiple,
+        preterite
       FROM words
       WHERE forms LIKE ?
         AND definition NOT LIKE 'inflection of%'
@@ -159,6 +178,13 @@ function parseRow(row: Record<string, unknown>, language: SupportedLanguage): Di
     forms: row.forms as string | null,
     ipa: row.ipa as string | null,
     audioUrl: getAudioUrl(row.audio as string | null),
+    // Enhanced German fields (will be null if columns don't exist yet)
+    gender: (row.gender as 'm' | 'f' | 'n' | null) || null,
+    article: (row.article as 'der' | 'die' | 'das' | null) || null,
+    plural: (row.plural as string | null) || null,
+    genitive: (row.genitive as string | null) || null,
+    pastParticiple: (row.pastParticiple as string | null) || null,
+    preterite: (row.preterite as string | null) || null,
   };
 }
 
@@ -389,7 +415,13 @@ export function searchPrefix(
         definitions_json as definitionsJson,
         forms,
         ipa,
-        audio
+        audio,
+        gender,
+        article,
+        plural,
+        genitive,
+        past_participle as pastParticiple,
+        preterite
       FROM words
       WHERE word_lower LIKE ?
         AND definition NOT LIKE 'inflection of%'

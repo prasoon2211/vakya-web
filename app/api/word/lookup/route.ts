@@ -132,10 +132,22 @@ export async function GET(request: Request) {
     const entry: DictionaryEntry | null = lookupWord(word, language as SupportedLanguage);
 
     if (entry) {
-      // Extract gender/article based on language
+      // For German, prefer direct database fields from TU Chemnitz enhancement
+      // Fall back to extraction functions if not present
       let genderInfo = { gender: null as string | null, article: null as string | null };
+
       if (language === 'German') {
-        genderInfo = extractGermanGender(entry);
+        // Prefer enhanced database fields
+        if (entry.article && entry.gender) {
+          const genderMap: Record<string, string> = { m: 'masculine', f: 'feminine', n: 'neuter' };
+          genderInfo = {
+            gender: genderMap[entry.gender] || entry.gender,
+            article: entry.article,
+          };
+        } else {
+          // Fall back to extraction
+          genderInfo = extractGermanGender(entry);
+        }
       } else if (language === 'French') {
         genderInfo = extractFrenchGender(entry);
       } else if (language === 'Spanish') {
@@ -144,6 +156,23 @@ export async function GET(request: Request) {
 
       // Parse forms into structured data
       const parsedForms = parseForms(entry.forms, language as SupportedLanguage);
+
+      // Build enhanced parsed forms with TU Chemnitz data
+      const enhancedParsedForms = { ...parsedForms };
+      if (language === 'German') {
+        if (entry.plural && !enhancedParsedForms?.plural) {
+          enhancedParsedForms.plural = entry.plural;
+        }
+        if (entry.genitive && !enhancedParsedForms?.genitive) {
+          enhancedParsedForms.genitive = entry.genitive;
+        }
+        if (entry.pastParticiple) {
+          enhancedParsedForms.pastParticiple = entry.pastParticiple;
+        }
+        if (entry.preterite) {
+          enhancedParsedForms.preterite = entry.preterite;
+        }
+      }
 
       return NextResponse.json({
         found: true,
@@ -154,11 +183,18 @@ export async function GET(request: Request) {
         definitions: entry.definitions,
         partOfSpeech: entry.partOfSpeech || null,
         forms: entry.forms || null,
-        parsedForms,
+        parsedForms: Object.keys(enhancedParsedForms || {}).length > 0 ? enhancedParsedForms : null,
         ipa: entry.ipa || null,
         audioUrl: entry.audioUrl || null,
         article: genderInfo.article,
         gender: genderInfo.gender,
+        // Additional German-specific fields
+        ...(language === 'German' && {
+          plural: entry.plural || enhancedParsedForms?.plural || null,
+          genitive: entry.genitive || enhancedParsedForms?.genitive || null,
+          pastParticiple: entry.pastParticiple || null,
+          preterite: entry.preterite || null,
+        }),
       });
     }
 
