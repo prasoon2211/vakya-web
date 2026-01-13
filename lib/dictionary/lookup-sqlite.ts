@@ -84,6 +84,9 @@ function getDb(language: SupportedLanguage): Database.Database {
 
 function getLookupStmt(language: SupportedLanguage): Database.Statement {
   if (!lookupStmts[language]) {
+    // Order by: prefer entries with real definitions over inflection references
+    // This ensures "Haus" (noun, "house") comes before "haus" (verb, "imperative of hausen")
+    // and "überprüfen" (verb, "to check") comes before "Überprüfen" (noun, "gerund of")
     lookupStmts[language] = getDb(language).prepare(`
       SELECT
         word_original as word,
@@ -101,6 +104,33 @@ function getLookupStmt(language: SupportedLanguage): Database.Statement {
         preterite
       FROM words
       WHERE word_lower = ?
+      ORDER BY
+        CASE
+          -- Pure inflection references (no actual meaning)
+          WHEN definition LIKE 'inflection of%' THEN 10
+          WHEN definition LIKE 'gerund of%' THEN 10
+          WHEN definition LIKE 'plural of%' THEN 10
+          WHEN definition LIKE 'singular of%' THEN 10
+          WHEN definition LIKE '%imperative of%' THEN 10
+          WHEN definition LIKE '%preterite of%' THEN 10
+          WHEN definition LIKE '%participle of%' THEN 10
+          WHEN definition LIKE '%person % of%' THEN 10
+          WHEN definition LIKE '%tense of%' THEN 10
+          WHEN definition LIKE 'nominative%of%' THEN 10
+          WHEN definition LIKE 'accusative%of%' THEN 10
+          WHEN definition LIKE 'genitive%of%' THEN 10
+          WHEN definition LIKE 'dative%of%' THEN 10
+          WHEN definition LIKE 'subjunctive%of%' THEN 10
+          -- Alternative/obsolete forms (second priority)
+          WHEN definition LIKE 'alternative%' THEN 5
+          WHEN definition LIKE 'obsolete%' THEN 5
+          WHEN definition LIKE 'archaic%' THEN 5
+          WHEN definition LIKE '%form of%' THEN 5
+          WHEN definition LIKE '%spelling of%' THEN 5
+          -- Real definitions (highest priority)
+          ELSE 1
+        END,
+        LENGTH(definition) DESC
       LIMIT 1
     `);
   }
@@ -266,7 +296,8 @@ function isInflectionReference(definition: string): boolean {
     /^singular of /i,
     /^inflection of /i,
 
-    // Person/number
+    // Person/number - handle "first/third-person", "first-person", "first person" etc.
+    /^(first|second|third)[/\- ]+(first|second|third)?[- ]*person /i,
     /^(first|second|third)[- ]person /i,
 
     // Gender/number combinations
@@ -282,6 +313,10 @@ function isInflectionReference(definition: string): boolean {
     /^(infinitive|imperative|subjunctive|indicative|conditional|optative) of /i,
     /^(future|preterite?|imperfect|perfect|pluperfect|aorist) of /i,
     /^(simple past|simple present|past tense|present tense) of /i,
+
+    // Singular imperative (common German pattern)
+    /^singular imperative of /i,
+    /^plural imperative of /i,
 
     // Cases (German, Latin, etc.)
     /^(nominative|accusative|genitive|dative|vocative|locative|instrumental|ablative).* of /i,
