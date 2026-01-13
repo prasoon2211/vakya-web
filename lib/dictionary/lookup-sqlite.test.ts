@@ -66,9 +66,42 @@ function lookupWord(word: string, language: 'German' | 'French' | 'Spanish'): Db
   const normalizedWord = trimmedWord.toLowerCase();
   if (!normalizedWord) return null;
 
+  // For German: use deterministic rule - capitalized words are nouns
+  if (language === 'German' && /^[A-ZÄÖÜ]/.test(trimmedWord)) {
+    // Look for noun entries first
+    const nounSql = `
+      SELECT
+        word_original as word,
+        part_of_speech as partOfSpeech,
+        definition,
+        definitions_json as definitionsJson,
+        forms,
+        ipa,
+        audio,
+        gender,
+        article,
+        plural,
+        genitive,
+        past_participle as pastParticiple,
+        preterite
+      FROM words
+      WHERE word_lower = ?
+        AND part_of_speech LIKE '%noun%'
+      ORDER BY
+        CASE
+          WHEN definition LIKE 'inflection of%' THEN 10
+          WHEN definition LIKE 'plural of%' THEN 10
+          ELSE 1
+        END,
+        LENGTH(definition) DESC
+      LIMIT 1
+    `;
+    const nounResult = db.query<DbRow, [string]>(nounSql).get(normalizedWord);
+    if (nounResult) return nounResult;
+  }
+
   // German has enhanced columns (gender, article, plural, etc.)
   // French and Spanish only have base columns
-  // Uses case-matching to prefer entries where original case matches input (German nouns are capitalized)
   const sql = language === 'German'
     ? `
       SELECT
@@ -110,7 +143,6 @@ function lookupWord(word: string, language: 'German' | 'French' | 'Spanish'): Db
           WHEN definition LIKE '%spelling of%' THEN 5
           ELSE 1
         END,
-        CASE WHEN word_original = ? THEN 0 ELSE 1 END,
         CASE
           WHEN part_of_speech LIKE '%noun%' THEN 1
           WHEN part_of_speech LIKE '%adjective%' THEN 2
@@ -164,13 +196,8 @@ function lookupWord(word: string, language: 'German' | 'French' | 'Spanish'): Db
       LIMIT 1
     `;
 
-  if (language === 'German') {
-    const query = db.query<DbRow, [string, string]>(sql);
-    return query.get(normalizedWord, trimmedWord);
-  } else {
-    const query = db.query<DbRow, [string]>(sql);
-    return query.get(normalizedWord);
-  }
+  const query = db.query<DbRow, [string]>(sql);
+  return query.get(normalizedWord);
 }
 
 // Helper to check if a definition contains actual meaning (not just a redirect)
@@ -324,13 +351,22 @@ describe('German - Ordering Preference', () => {
     expect(result?.definition).toContain('Aufgabe');
   });
 
-  test('lowercase "aufgaben" matches verb (exact case match)', () => {
-    // When typed lowercase, matches the verb entry "aufgaben" exactly
-    // This is expected behavior - German nouns are capitalized, so lowercase
-    // suggests the user might mean the verb form
+  test('capitalized "Beamten" returns noun, not verb', () => {
+    // "Beamten" (capitalized) is noun (inflection of Beamter = civil servant)
+    // "beamten" (lowercase) is a verb meaning "to provide a post to"
+    // Capitalized = noun in German
+    const result = lookupWord('Beamten', 'German');
+    expect(result).not.toBeNull();
+    expect(result?.partOfSpeech).toContain('noun');
+    expect(result?.definition).toContain('Beamter');
+  });
+
+  test('lowercase "aufgaben" still prefers noun over verb inflection', () => {
+    // Even when lowercase, we prefer nouns over verb inflection forms
+    // because they're more useful for language learners
     const result = lookupWord('aufgaben', 'German');
     expect(result).not.toBeNull();
-    expect(result?.partOfSpeech).toContain('verb');
+    expect(result?.partOfSpeech).toContain('noun');
   });
 });
 

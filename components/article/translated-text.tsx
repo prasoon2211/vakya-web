@@ -5,18 +5,24 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Drawer, DrawerContent, DrawerTrigger, DrawerTitle } from "@/components/ui/drawer";
 import { WordTooltip } from "./word-tooltip";
 import { useIsMobile } from "@/lib/hooks/use-media-query";
+import { type ViewMode } from "./view-mode-toggle";
+import { MobileViewToggle } from "./mobile-view-toggle";
+import { DesktopViewToggle } from "./desktop-view-toggle";
 
-interface TranslationBlock {
+export interface TranslationBlock {
   original: string;
   translated: string;
+  bridge?: string; // 1-1 English translation of the translated text
 }
 
 interface TranslatedTextProps {
   blocks: TranslationBlock[];
   targetLanguage: string;
   articleId: string;
-  showOriginal?: boolean;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
   isOriginalContent?: boolean; // When source = target, hide toggle hints
+  hasAudioPlayer?: boolean; // Whether full audio player is showing (affects mobile toggle position)
 }
 
 interface WordSpanProps {
@@ -143,29 +149,26 @@ function OriginalText({ text }: { text: string }) {
 }
 
 // A chunk may contain multiple paragraphs separated by \n\n
-// Renders BOTH original and translated, uses CSS to toggle (instant, no re-render)
+// Renders all 3 versions (target, bridge, source), uses CSS to toggle (instant, no re-render)
 function TranslationChunk({
   block,
   targetLanguage,
   articleId,
-  showOriginal,
+  viewMode,
 }: {
   block: TranslationBlock;
   targetLanguage: string;
   articleId: string;
-  showOriginal: boolean;
+  viewMode: ViewMode;
 }) {
   // Split translated text into paragraphs (chunks may have internal \n\n breaks)
   const translatedParagraphs = block.translated.split(/\n\n+/).filter(p => p.trim());
+  const bridgeParagraphs = block.bridge?.split(/\n\n+/).filter(p => p.trim()) || [];
 
   return (
     <div className="relative">
-      {/* Original text - hidden by default, shown when showOriginal is true */}
-      <div className={showOriginal ? "block" : "hidden"}>
-        <OriginalText text={block.original} />
-      </div>
-      {/* Translated text - shown by default, hidden when showOriginal is true */}
-      <div className={showOriginal ? "hidden" : "block"}>
+      {/* Target language (translated) - shown by default */}
+      <div className={viewMode === "target" ? "block" : "hidden"}>
         {translatedParagraphs.map((paragraph, i) => (
           <ParagraphText
             key={i}
@@ -175,32 +178,83 @@ function TranslationChunk({
           />
         ))}
       </div>
+      {/* Bridge (1-1 English translation) */}
+      <div className={viewMode === "bridge" ? "block" : "hidden"}>
+        {bridgeParagraphs.length > 0 ? (
+          bridgeParagraphs.map((paragraph, i) => (
+            <p key={i} className="text-lg leading-relaxed text-[#4a4a4a] mb-6">
+              {paragraph}
+            </p>
+          ))
+        ) : (
+          // Fallback if no bridge available
+          <p className="text-lg leading-relaxed text-[#9a9a9a] italic mb-6">
+            English translation not available for this section.
+          </p>
+        )}
+      </div>
+      {/* Source (original article text) */}
+      <div className={viewMode === "source" ? "block" : "hidden"}>
+        <OriginalText text={block.original} />
+      </div>
     </div>
   );
 }
 
-export function TranslatedText({ blocks, targetLanguage, articleId, showOriginal = false, isOriginalContent = false }: TranslatedTextProps) {
-  const [localShowOriginal, setLocalShowOriginal] = useState(showOriginal);
+export function TranslatedText({
+  blocks,
+  targetLanguage,
+  articleId,
+  viewMode: externalViewMode = "target",
+  onViewModeChange,
+  isOriginalContent = false,
+  hasAudioPlayer = false,
+}: TranslatedTextProps) {
+  const [internalViewMode, setInternalViewMode] = useState<ViewMode>(externalViewMode);
   const isMobile = useIsMobile();
 
-  // Sync with prop changes
-  useEffect(() => {
-    setLocalShowOriginal(showOriginal);
-  }, [showOriginal]);
+  // Check if any block has bridge translation
+  const hasBridge = blocks.some(block => block.bridge && block.bridge.length > 0);
 
-  // Desktop: Handle Cmd/Ctrl key for showing original (skip if original content)
+  // Sync with external prop changes
   useEffect(() => {
-    if (isMobile || isOriginalContent) return; // Skip on mobile or when source = target
+    setInternalViewMode(externalViewMode);
+  }, [externalViewMode]);
+
+  // Use external or internal state
+  const viewMode = onViewModeChange ? externalViewMode : internalViewMode;
+  const setViewMode = onViewModeChange || setInternalViewMode;
+
+  // Desktop: Handle Cmd/Ctrl key for quick view switching (skip if original content)
+  useEffect(() => {
+    if (isMobile || isOriginalContent) return;
+
+    let originalMode: ViewMode = "target";
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Meta" || e.key === "Control") {
-        setLocalShowOriginal(true);
+        // Save current mode before switching
+        originalMode = viewMode;
+        if (e.shiftKey) {
+          // Cmd+Shift = Source
+          setViewMode("source");
+        } else if (hasBridge) {
+          // Cmd = Bridge (only if available)
+          setViewMode("bridge");
+        } else {
+          // Fallback to source if no bridge
+          setViewMode("source");
+        }
+      } else if (e.key === "Shift" && (e.metaKey || e.ctrlKey)) {
+        // If already holding Cmd and press Shift, switch to source
+        setViewMode("source");
       }
     };
 
     const handleGlobalKeyUp = (e: KeyboardEvent) => {
       if (e.key === "Meta" || e.key === "Control") {
-        setLocalShowOriginal(false);
+        // Return to target when releasing Cmd/Ctrl
+        setViewMode("target");
       }
     };
 
@@ -211,17 +265,29 @@ export function TranslatedText({ blocks, targetLanguage, articleId, showOriginal
       window.removeEventListener("keydown", handleGlobalKeyDown);
       window.removeEventListener("keyup", handleGlobalKeyUp);
     };
-  }, [isMobile, isOriginalContent]);
+  }, [isMobile, isOriginalContent, hasBridge, viewMode, setViewMode]);
 
   return (
     <div className="max-w-none">
-      {/* Desktop hint - hide when source = target */}
-      {!isMobile && !isOriginalContent && (
-        <div className="hidden md:block text-right mb-4">
-          <span className="text-xs text-[#9a9a9a] bg-white/80 px-2 py-0.5 rounded">
-            {localShowOriginal ? "Showing original" : "Hold ⌘ for original"}
-          </span>
-        </div>
+      {/* Desktop: Floating toggle on right side */}
+      {!isOriginalContent && !isMobile && (
+        <DesktopViewToggle
+          mode={viewMode}
+          onModeChange={setViewMode}
+          targetLanguage={targetLanguage}
+          hasBridge={hasBridge}
+        />
+      )}
+
+      {/* Mobile: Floating toggle in bottom-right corner */}
+      {!isOriginalContent && isMobile && (
+        <MobileViewToggle
+          mode={viewMode}
+          onModeChange={setViewMode}
+          targetLanguage={targetLanguage}
+          hasBridge={hasBridge}
+          hasAudioPlayer={hasAudioPlayer}
+        />
       )}
 
       {blocks.map((block, index) => (
@@ -230,7 +296,7 @@ export function TranslatedText({ blocks, targetLanguage, articleId, showOriginal
           block={block}
           targetLanguage={targetLanguage}
           articleId={articleId}
-          showOriginal={localShowOriginal}
+          viewMode={viewMode}
         />
       ))}
     </div>

@@ -10,7 +10,6 @@ import {
   Trash2,
   Loader2,
   Share2,
-  Sparkles,
   RefreshCw,
   AlertCircle,
 } from "lucide-react";
@@ -29,7 +28,6 @@ import {
 import { toast } from "@/components/ui/use-toast";
 import { TranslatedText } from "@/components/article/translated-text";
 import { AudioPlayer } from "@/components/article/audio-player";
-import { OriginalToggle } from "@/components/article/original-toggle";
 import { ReadingMode } from "@/components/article/reading-mode";
 import { extractDomain } from "@/lib/utils";
 import type { Article } from "@/lib/db/schema";
@@ -51,7 +49,6 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [signedAudioUrl, setSignedAudioUrl] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
-  const [showOriginal, setShowOriginal] = useState(false);
   const [audioTimestamps, setAudioTimestamps] = useState<WordTimestamp[] | null>(null);
   const [showReadingMode, setShowReadingMode] = useState(false);
   const [initialReadingWordIndex, setInitialReadingWordIndex] = useState(0);
@@ -580,35 +577,14 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           )}
         </div>
 
-        {/* Instructions - hidden on mobile to save space */}
-        <Card className="hidden md:block p-4 mb-8 bg-gradient-to-r from-[#c45c3e]/5 to-[#2d5a47]/5 border-[#c45c3e]/20">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[#c45c3e]/10 flex items-center justify-center">
-              <Sparkles className="h-4 w-4 text-[#c45c3e]" />
-            </div>
-            <p className="text-sm text-[#6b6b6b]">
-              <strong className="text-[#1a1a1a]">Tip:</strong> Tap any word to see its meaning.
-              {!isOriginalContent && (
-                <>
-                  {" "}Hold{" "}
-                  <kbd className="px-1.5 py-0.5 text-xs bg-[#f3ede4] rounded border border-[#e8dfd3]">
-                    Cmd
-                  </kbd>{" "}
-                  to see the original text.
-                </>
-              )}
-            </p>
-          </div>
-        </Card>
-
         {/* Content */}
         {hasContent ? (
           <TranslatedText
             blocks={blocks}
             targetLanguage={article.targetLanguage}
             articleId={article.id}
-            showOriginal={showOriginal}
             isOriginalContent={isOriginalContent}
+            hasAudioPlayer={!!signedAudioUrl}
           />
         ) : (
           <div className="text-center py-12">
@@ -616,15 +592,6 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           </div>
         )}
       </article>
-
-      {/* Mobile: Floating toggle for original text - hide when source = target */}
-      {hasContent && !isOriginalContent && (
-        <OriginalToggle
-          showOriginal={showOriginal}
-          onToggle={() => setShowOriginal(!showOriginal)}
-          hasAudioPlayer={!!signedAudioUrl}
-        />
-      )}
 
       {/* Audio Player / Generate Button - only show when translation is complete */}
       {article.status === "completed" && (

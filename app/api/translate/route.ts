@@ -130,22 +130,30 @@ async function fetchArticleHtml(url: string, articleId: string): Promise<{ html:
 interface TranslationBlock {
   original: string;
   translated: string;
+  bridge?: string; // 1-1 English translation of the translated text
 }
 
 // Extract main article content using Readability
 function extractArticleContent(html: string, url: string): { title: string; content: string } | null {
   try {
+    console.log(`[Readability] Input HTML length: ${html.length} bytes`);
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
 
     if (!article) {
+      console.log(`[Readability] parse() returned null`);
       return null;
     }
 
+    const content = article.textContent || "";
+    console.log(`[Readability] Extracted title: "${article.title}"`);
+    console.log(`[Readability] Extracted content length: ${content.length} chars`);
+    console.log(`[Readability] Content preview: ${content.slice(0, 200)}...`);
+
     return {
       title: article.title || "Untitled",
-      content: article.textContent || "",
+      content,
     };
   } catch (error) {
     console.error("Readability extraction failed:", error);
@@ -206,11 +214,37 @@ function countWords(text: string): number {
 }
 
 function splitAtSentences(text: string, maxWords: number): string[] {
-  // Match sentences ending with . ! ? followed by space or end
-  // Also handle common abbreviations to avoid false splits
-  const sentencePattern = /[^.!?]*[.!?]+(?:\s+|$)/g;
-  const sentences = text.match(sentencePattern) || [text];
+  // Step 1: Normalize text - add space after sentence-ending punctuation if followed by capital letter
+  // This fixes Readability stripping whitespace (e.g., "time.Ten days" -> "time. Ten days")
+  const normalizedText = text
+    .replace(/([.!?])([A-Z])/g, '$1 $2')  // "time.Ten" -> "time. Ten"
+    .replace(/([.!?])(["'])([A-Z])/g, '$1$2 $3');  // 'said."He' -> 'said." He'
 
+  console.log(`[splitAtSentences] Input: ${countWords(text)} words, normalized length: ${normalizedText.length}`);
+
+  // Step 2: Split on sentence boundaries (punctuation followed by space)
+  // Simpler pattern now that text is normalized
+  const sentencePattern = /[^.!?]*[.!?]+[\s]*/g;
+  const matches: string[] = normalizedText.match(sentencePattern) || [];
+
+  // Step 3: CRITICAL - capture any remaining text that didn't match
+  // This prevents losing content that doesn't end with punctuation
+  const matchedLength = matches.join('').length;
+  if (matchedLength < normalizedText.length) {
+    const remaining = normalizedText.slice(matchedLength).trim();
+    if (remaining) {
+      matches.push(remaining);
+      console.log(`[splitAtSentences] Captured ${countWords(remaining)} words of unmatched trailing text`);
+    }
+  }
+
+  // Step 4: Fallback - if nothing matched, return original text as single chunk
+  const sentences = matches.length > 0 ? matches : [text];
+
+  const totalMatchedWords = sentences.reduce((sum, s) => sum + countWords(s), 0);
+  console.log(`[splitAtSentences] Result: ${sentences.length} sentences, ${totalMatchedWords} total words`);
+
+  // Step 5: Group sentences into chunks of ~maxWords
   const chunks: string[] = [];
   let current = '';
   let currentWords = 0;
@@ -240,18 +274,24 @@ function splitAtSentences(text: string, maxWords: number): string[] {
 function smartChunkContent(content: string): string[] {
   const { MIN_WORDS, TARGET_WORDS, MAX_WORDS } = CHUNK_CONFIG;
 
+  console.log(`[Chunking] Input content length: ${content.length} chars, ${countWords(content)} words`);
+
   // Step 1: Split on natural paragraph boundaries
   let segments = content
     .split(/\n\n+/)
     .map(p => p.trim())
     .filter(p => p.length > 0);
 
+  console.log(`[Chunking] After double-newline split: ${segments.length} segments`);
+
   // If no double newlines, try single newlines for very long content
   if (segments.length <= 1 && countWords(content) > MAX_WORDS) {
+    console.log(`[Chunking] Only 1 segment with ${countWords(content)} words > MAX_WORDS (${MAX_WORDS}), trying single newline split`);
     segments = content
       .split(/\n+/)
       .map(p => p.trim())
       .filter(p => p.length > 0);
+    console.log(`[Chunking] After single-newline split: ${segments.length} segments`);
   }
 
   // Step 2: Split oversized segments at sentence boundaries
@@ -320,7 +360,9 @@ function smartChunkContent(content: string): string[] {
   }
 
   // Filter out any empty chunks
-  return merged.filter(chunk => chunk.trim().length > 0);
+  const finalChunks = merged.filter(chunk => chunk.trim().length > 0);
+  console.log(`[Chunking] Final result: ${finalChunks.length} chunks with word counts: ${finalChunks.map(c => countWords(c)).join(', ')}`);
+  return finalChunks;
 }
 
 // Detect the language of text using Gemini
@@ -384,15 +426,25 @@ async function translateChunk(
     ? `Return JSON format:
 {
   "original": "the CLEAN extracted article text in the SOURCE language (no HTML, no garbage - just the article paragraphs)",
-  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level"
+  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level",
+  "bridge": "English translation that maps EXACTLY 1-1 to your translated text"
 }
 
-IMPORTANT: The "original" field must contain the clean, readable source article text - NOT HTML, NOT a summary.`
+IMPORTANT:
+- The "original" field must contain the clean, readable source article text - NOT HTML, NOT a summary.
+- The "bridge" field must have the SAME NUMBER OF SENTENCES as "translated", in the same order.
+- Each bridge sentence should be the direct English meaning of the corresponding translated sentence.`
     : `Return JSON format:
 {
-  "original": "brief description of source content",
-  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level covering all main points"
-}`;
+  "original": "the source text you received (preserve it exactly)",
+  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level",
+  "bridge": "English translation that maps EXACTLY 1-1 to your translated text"
+}
+
+IMPORTANT:
+- The "original" field must contain the input text you received - preserve it, do NOT summarize.
+- The "bridge" field must have the SAME NUMBER OF SENTENCES as "translated", in the same order.
+- Each bridge sentence should be the direct English meaning of the corresponding translated sentence.`;
 
   const prompt = `You are a professional language learning content adapter. Your job is to extract article content and translate/adapt it into ${targetLanguage} for a ${cefrLevel} learner.
 
@@ -462,7 +514,11 @@ ${text}`;
           const originalText = (returnCleanOriginal && parsed.original && parsed.original.length > 50)
             ? parsed.original
             : text;
-          return { original: originalText, translated: parsed.translated };
+          return {
+            original: originalText,
+            translated: parsed.translated,
+            bridge: parsed.bridge || undefined, // 1-1 English translation
+          };
         }
       } catch {
         // If parsing fails, return original as translated (fallback)
@@ -473,7 +529,7 @@ ${text}`;
     console.error("Gemini translation error:", error);
   }
 
-  // Fallback: return original text as translation
+  // Fallback: return original text as translation (no bridge available)
   return { original: text, translated: text };
 }
 

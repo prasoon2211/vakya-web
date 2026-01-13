@@ -82,16 +82,11 @@ function getDb(language: SupportedLanguage): Database.Database {
   }
 }
 
-// Prepared statement with capitalization matching (for German noun detection)
-function getLookupStmtWithCase(language: SupportedLanguage): Database.Statement {
-  const stmtKey = `${language}_with_case` as SupportedLanguage;
+// German-specific: lookup noun entries only (for capitalized words)
+function getGermanNounLookupStmt(): Database.Statement {
+  const stmtKey = 'German_noun' as SupportedLanguage;
   if (!lookupStmts[stmtKey]) {
-    // Order by: prefer entries with real definitions over inflection references
-    // This ensures "Haus" (noun, "house") comes before "haus" (verb, "imperative of hausen")
-    // and "überprüfen" (verb, "to check") comes before "Überprüfen" (noun, "gerund of")
-    // When both are inflection references, prefer nouns over verbs (more useful for learners)
-    // Also prefer entries where the original case matches the input (German nouns are capitalized)
-    lookupStmts[stmtKey] = getDb(language).prepare(`
+    lookupStmts[stmtKey] = getDb('German').prepare(`
       SELECT
         word_original as word,
         part_of_speech as partOfSpeech,
@@ -108,41 +103,13 @@ function getLookupStmtWithCase(language: SupportedLanguage): Database.Statement 
         preterite
       FROM words
       WHERE word_lower = ?
+        AND part_of_speech LIKE '%noun%'
       ORDER BY
         CASE
-          -- Pure inflection references (no actual meaning)
           WHEN definition LIKE 'inflection of%' THEN 10
-          WHEN definition LIKE 'gerund of%' THEN 10
           WHEN definition LIKE 'plural of%' THEN 10
           WHEN definition LIKE 'singular of%' THEN 10
-          WHEN definition LIKE '%imperative of%' THEN 10
-          WHEN definition LIKE '%preterite of%' THEN 10
-          WHEN definition LIKE '%participle of%' THEN 10
-          WHEN definition LIKE '%person % of%' THEN 10
-          WHEN definition LIKE '%tense of%' THEN 10
-          WHEN definition LIKE 'nominative%of%' THEN 10
-          WHEN definition LIKE 'accusative%of%' THEN 10
-          WHEN definition LIKE 'genitive%of%' THEN 10
-          WHEN definition LIKE 'dative%of%' THEN 10
-          WHEN definition LIKE 'subjunctive%of%' THEN 10
-          -- Alternative/obsolete forms (second priority)
-          WHEN definition LIKE 'alternative%' THEN 5
-          WHEN definition LIKE 'obsolete%' THEN 5
-          WHEN definition LIKE 'archaic%' THEN 5
-          WHEN definition LIKE '%form of%' THEN 5
-          WHEN definition LIKE '%spelling of%' THEN 5
-          -- Real definitions (highest priority)
           ELSE 1
-        END,
-        -- Prefer entries where the original case matches the input
-        -- (German nouns are capitalized, so "Aufgaben" should match the noun not the verb "aufgaben")
-        CASE WHEN word_original = ? THEN 0 ELSE 1 END,
-        -- When both are inflection refs, prefer nouns over verbs (more useful for learners)
-        CASE
-          WHEN part_of_speech LIKE '%noun%' THEN 1
-          WHEN part_of_speech LIKE '%adjective%' THEN 2
-          WHEN part_of_speech LIKE '%adverb%' THEN 3
-          ELSE 4
         END,
         LENGTH(definition) DESC
       LIMIT 1
@@ -322,10 +289,19 @@ export function lookupWord(
     if (visitedWords.has(normalizedWord)) return null;
     visitedWords.add(normalizedWord);
 
-    // Direct lookup with case preference
-    // For German, prefer entries where capitalization matches (nouns are capitalized)
-    // This ensures "Aufgaben" (noun) is returned instead of "aufgaben" (verb form)
-    const row = getLookupStmtWithCase(language).get(normalizedWord, trimmedWord) as Record<string, unknown> | undefined;
+    // For German: use deterministic rule based on capitalization
+    // In German, ALL nouns are capitalized. If word starts with uppercase, it's a noun.
+    let row: Record<string, unknown> | undefined;
+
+    if (language === 'German' && /^[A-ZÄÖÜ]/.test(trimmedWord)) {
+      // Capitalized German word = noun. Look for noun entries first.
+      row = getGermanNounLookupStmt().get(normalizedWord) as Record<string, unknown> | undefined;
+    }
+
+    // Fall back to general lookup if no noun found (or not German/not capitalized)
+    if (!row) {
+      row = getLookupStmt(language).get(normalizedWord) as Record<string, unknown> | undefined;
+    }
 
     if (row) {
       const entry = parseRow(row, language);
