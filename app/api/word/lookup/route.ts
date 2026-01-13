@@ -134,24 +134,29 @@ export async function GET(request: Request) {
     if (entry) {
       // For German, prefer direct database fields from TU Chemnitz enhancement
       // Fall back to extraction functions if not present
+      // IMPORTANT: Only apply gender/article for nouns, not verbs or other parts of speech
       let genderInfo = { gender: null as string | null, article: null as string | null };
+      const pos = entry.partOfSpeech?.toLowerCase() || '';
+      const isNoun = pos.includes('noun');
 
-      if (language === 'German') {
-        // Prefer enhanced database fields
-        if (entry.article && entry.gender) {
-          const genderMap: Record<string, string> = { m: 'masculine', f: 'feminine', n: 'neuter' };
-          genderInfo = {
-            gender: genderMap[entry.gender] || entry.gender,
-            article: entry.article,
-          };
-        } else {
-          // Fall back to extraction
-          genderInfo = extractGermanGender(entry);
+      if (isNoun) {
+        if (language === 'German') {
+          // Prefer enhanced database fields
+          if (entry.article && entry.gender) {
+            const genderMap: Record<string, string> = { m: 'masculine', f: 'feminine', n: 'neuter' };
+            genderInfo = {
+              gender: genderMap[entry.gender] || entry.gender,
+              article: entry.article,
+            };
+          } else {
+            // Fall back to extraction
+            genderInfo = extractGermanGender(entry);
+          }
+        } else if (language === 'French') {
+          genderInfo = extractFrenchGender(entry);
+        } else if (language === 'Spanish') {
+          genderInfo = extractSpanishGender(entry);
         }
-      } else if (language === 'French') {
-        genderInfo = extractFrenchGender(entry);
-      } else if (language === 'Spanish') {
-        genderInfo = extractSpanishGender(entry);
       }
 
       // Parse forms into structured data

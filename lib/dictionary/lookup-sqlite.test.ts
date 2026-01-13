@@ -62,11 +62,13 @@ interface DbRow {
 
 function lookupWord(word: string, language: 'German' | 'French' | 'Spanish'): DbRow | null {
   const db = language === 'German' ? getGermanDb() : language === 'French' ? getFrenchDb() : getSpanishDb();
-  const normalizedWord = word.toLowerCase().trim();
+  const trimmedWord = word.trim();
+  const normalizedWord = trimmedWord.toLowerCase();
   if (!normalizedWord) return null;
 
   // German has enhanced columns (gender, article, plural, etc.)
   // French and Spanish only have base columns
+  // Uses case-matching to prefer entries where original case matches input (German nouns are capitalized)
   const sql = language === 'German'
     ? `
       SELECT
@@ -107,6 +109,13 @@ function lookupWord(word: string, language: 'German' | 'French' | 'Spanish'): Db
           WHEN definition LIKE '%form of%' THEN 5
           WHEN definition LIKE '%spelling of%' THEN 5
           ELSE 1
+        END,
+        CASE WHEN word_original = ? THEN 0 ELSE 1 END,
+        CASE
+          WHEN part_of_speech LIKE '%noun%' THEN 1
+          WHEN part_of_speech LIKE '%adjective%' THEN 2
+          WHEN part_of_speech LIKE '%adverb%' THEN 3
+          ELSE 4
         END,
         LENGTH(definition) DESC
       LIMIT 1
@@ -155,8 +164,13 @@ function lookupWord(word: string, language: 'German' | 'French' | 'Spanish'): Db
       LIMIT 1
     `;
 
-  const query = db.query<DbRow, [string]>(sql);
-  return query.get(normalizedWord);
+  if (language === 'German') {
+    const query = db.query<DbRow, [string, string]>(sql);
+    return query.get(normalizedWord, trimmedWord);
+  } else {
+    const query = db.query<DbRow, [string]>(sql);
+    return query.get(normalizedWord);
+  }
 }
 
 // Helper to check if a definition contains actual meaning (not just a redirect)
@@ -298,6 +312,25 @@ describe('German - Ordering Preference', () => {
     const result = lookupWord('aalen', 'German');
     expect(result).not.toBeNull();
     expect(hasActualMeaning(result?.definition ?? null)).toBe(true);
+  });
+
+  test('capitalized "Aufgaben" returns noun, not verb form', () => {
+    // "Aufgaben" (capitalized) is noun plural of "Aufgabe" (task)
+    // "aufgaben" (lowercase) is a verb form of "aufgeben" (to give up)
+    // When user types "Aufgaben" with capital, prefer the noun
+    const result = lookupWord('Aufgaben', 'German');
+    expect(result).not.toBeNull();
+    expect(result?.partOfSpeech).toContain('noun');
+    expect(result?.definition).toContain('Aufgabe');
+  });
+
+  test('lowercase "aufgaben" matches verb (exact case match)', () => {
+    // When typed lowercase, matches the verb entry "aufgaben" exactly
+    // This is expected behavior - German nouns are capitalized, so lowercase
+    // suggests the user might mean the verb form
+    const result = lookupWord('aufgaben', 'German');
+    expect(result).not.toBeNull();
+    expect(result?.partOfSpeech).toContain('verb');
   });
 });
 

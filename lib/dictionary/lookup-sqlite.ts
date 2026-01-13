@@ -82,11 +82,81 @@ function getDb(language: SupportedLanguage): Database.Database {
   }
 }
 
+// Prepared statement with capitalization matching (for German noun detection)
+function getLookupStmtWithCase(language: SupportedLanguage): Database.Statement {
+  const stmtKey = `${language}_with_case` as SupportedLanguage;
+  if (!lookupStmts[stmtKey]) {
+    // Order by: prefer entries with real definitions over inflection references
+    // This ensures "Haus" (noun, "house") comes before "haus" (verb, "imperative of hausen")
+    // and "überprüfen" (verb, "to check") comes before "Überprüfen" (noun, "gerund of")
+    // When both are inflection references, prefer nouns over verbs (more useful for learners)
+    // Also prefer entries where the original case matches the input (German nouns are capitalized)
+    lookupStmts[stmtKey] = getDb(language).prepare(`
+      SELECT
+        word_original as word,
+        part_of_speech as partOfSpeech,
+        definition,
+        definitions_json as definitionsJson,
+        forms,
+        ipa,
+        audio,
+        gender,
+        article,
+        plural,
+        genitive,
+        past_participle as pastParticiple,
+        preterite
+      FROM words
+      WHERE word_lower = ?
+      ORDER BY
+        CASE
+          -- Pure inflection references (no actual meaning)
+          WHEN definition LIKE 'inflection of%' THEN 10
+          WHEN definition LIKE 'gerund of%' THEN 10
+          WHEN definition LIKE 'plural of%' THEN 10
+          WHEN definition LIKE 'singular of%' THEN 10
+          WHEN definition LIKE '%imperative of%' THEN 10
+          WHEN definition LIKE '%preterite of%' THEN 10
+          WHEN definition LIKE '%participle of%' THEN 10
+          WHEN definition LIKE '%person % of%' THEN 10
+          WHEN definition LIKE '%tense of%' THEN 10
+          WHEN definition LIKE 'nominative%of%' THEN 10
+          WHEN definition LIKE 'accusative%of%' THEN 10
+          WHEN definition LIKE 'genitive%of%' THEN 10
+          WHEN definition LIKE 'dative%of%' THEN 10
+          WHEN definition LIKE 'subjunctive%of%' THEN 10
+          -- Alternative/obsolete forms (second priority)
+          WHEN definition LIKE 'alternative%' THEN 5
+          WHEN definition LIKE 'obsolete%' THEN 5
+          WHEN definition LIKE 'archaic%' THEN 5
+          WHEN definition LIKE '%form of%' THEN 5
+          WHEN definition LIKE '%spelling of%' THEN 5
+          -- Real definitions (highest priority)
+          ELSE 1
+        END,
+        -- Prefer entries where the original case matches the input
+        -- (German nouns are capitalized, so "Aufgaben" should match the noun not the verb "aufgaben")
+        CASE WHEN word_original = ? THEN 0 ELSE 1 END,
+        -- When both are inflection refs, prefer nouns over verbs (more useful for learners)
+        CASE
+          WHEN part_of_speech LIKE '%noun%' THEN 1
+          WHEN part_of_speech LIKE '%adjective%' THEN 2
+          WHEN part_of_speech LIKE '%adverb%' THEN 3
+          ELSE 4
+        END,
+        LENGTH(definition) DESC
+      LIMIT 1
+    `);
+  }
+  return lookupStmts[stmtKey]!;
+}
+
 function getLookupStmt(language: SupportedLanguage): Database.Statement {
   if (!lookupStmts[language]) {
     // Order by: prefer entries with real definitions over inflection references
     // This ensures "Haus" (noun, "house") comes before "haus" (verb, "imperative of hausen")
     // and "überprüfen" (verb, "to check") comes before "Überprüfen" (noun, "gerund of")
+    // When both are inflection references, prefer nouns over verbs (more useful for learners)
     lookupStmts[language] = getDb(language).prepare(`
       SELECT
         word_original as word,
@@ -129,6 +199,13 @@ function getLookupStmt(language: SupportedLanguage): Database.Statement {
           WHEN definition LIKE '%spelling of%' THEN 5
           -- Real definitions (highest priority)
           ELSE 1
+        END,
+        -- When both are inflection refs, prefer nouns over verbs (more useful for learners)
+        CASE
+          WHEN part_of_speech LIKE '%noun%' THEN 1
+          WHEN part_of_speech LIKE '%adjective%' THEN 2
+          WHEN part_of_speech LIKE '%adverb%' THEN 3
+          ELSE 4
         END,
         LENGTH(definition) DESC
       LIMIT 1
@@ -237,15 +314,18 @@ export function lookupWord(
   visitedWords: Set<string> = new Set()
 ): DictionaryEntry | null {
   try {
-    const normalizedWord = word.toLowerCase().trim();
+    const trimmedWord = word.trim();
+    const normalizedWord = trimmedWord.toLowerCase();
     if (!normalizedWord || normalizedWord.length < 1) return null;
 
     // Prevent infinite loops
     if (visitedWords.has(normalizedWord)) return null;
     visitedWords.add(normalizedWord);
 
-    // Direct lookup
-    const row = getLookupStmt(language).get(normalizedWord) as Record<string, unknown> | undefined;
+    // Direct lookup with case preference
+    // For German, prefer entries where capitalization matches (nouns are capitalized)
+    // This ensures "Aufgaben" (noun) is returned instead of "aufgaben" (verb form)
+    const row = getLookupStmtWithCase(language).get(normalizedWord, trimmedWord) as Record<string, unknown> | undefined;
 
     if (row) {
       const entry = parseRow(row, language);

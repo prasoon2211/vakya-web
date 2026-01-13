@@ -310,9 +310,11 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
       const scrollPercent = scrollWrapper.scrollTop /
         Math.max(1, scrollWrapper.scrollHeight - scrollWrapper.clientHeight);
 
-      // Find word at approximately this percentage through the article
-      // Use a bit ahead of the scroll position (user is reading what's visible, not what's scrolled past)
-      const adjustedPercent = Math.min(1, scrollPercent + 0.1); // Look 10% ahead
+      // If at the very top (or nearly), start from the beginning
+      // Otherwise, look a bit ahead of scroll position (user reads what's visible, not scrolled past)
+      const adjustedPercent = scrollPercent < 0.02
+        ? 0
+        : Math.min(1, scrollPercent + 0.1);
       const wordIndex = Math.floor(adjustedPercent * audioTimestamps.length);
       setInitialReadingWordIndex(Math.min(wordIndex, audioTimestamps.length - 1));
     } else {
