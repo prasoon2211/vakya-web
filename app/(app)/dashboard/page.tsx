@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Globe, Headphones, Loader2, Sparkles, BookOpen, ExternalLink, RefreshCw, AlertCircle, Trash2, MoreVertical, FileText, Upload, Link2, Type } from "lucide-react";
+import { DashboardOnboarding } from "@/components/onboarding/dashboard-onboarding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -72,6 +73,7 @@ export default function DashboardPage() {
   const [translationState, setTranslationState] = useState<TranslationState>({ status: "idle" });
   const [articles, setArticles] = useState<Article[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const articlesPollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Cleanup polling on unmount
@@ -86,7 +88,35 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchArticles();
     fetchUserSettings();
+    checkOnboardingStatus();
   }, []);
+
+  const checkOnboardingStatus = async () => {
+    try {
+      const res = await fetch("/api/onboarding");
+      if (res.ok) {
+        const data = await res.json();
+        if (!data.dashboardCompleted) {
+          setShowOnboarding(true);
+        }
+      }
+    } catch {
+      // Ignore errors, just don't show onboarding
+    }
+  };
+
+  const handleOnboardingComplete = async () => {
+    setShowOnboarding(false);
+    try {
+      await fetch("/api/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "dashboard" }),
+      });
+    } catch {
+      // Ignore errors
+    }
+  };
 
   // Poll for status updates on all processing articles
   useEffect(() => {
@@ -1089,6 +1119,13 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      {/* Onboarding Modal */}
+      <DashboardOnboarding
+        open={showOnboarding}
+        onComplete={handleOnboardingComplete}
+        targetLanguage={targetLanguage}
+      />
     </div>
   );
 }

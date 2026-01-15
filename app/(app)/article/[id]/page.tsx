@@ -13,6 +13,7 @@ import {
   RefreshCw,
   AlertCircle,
 } from "lucide-react";
+import { ArticleOnboarding } from "@/components/onboarding/article-onboarding";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -52,7 +53,9 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const [audioTimestamps, setAudioTimestamps] = useState<WordTimestamp[] | null>(null);
   const [showReadingMode, setShowReadingMode] = useState(false);
   const [initialReadingWordIndex, setInitialReadingWordIndex] = useState(0);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const onboardingCheckedRef = useRef(false);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -123,6 +126,41 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   useEffect(() => {
     fetchArticle();
   }, [fetchArticle]);
+
+  // Check onboarding status when article content is ready
+  useEffect(() => {
+    if (article?.status === "completed" && blocks.length > 0 && !onboardingCheckedRef.current) {
+      onboardingCheckedRef.current = true;
+      checkArticleOnboardingStatus();
+    }
+  }, [article?.status, blocks.length]);
+
+  const checkArticleOnboardingStatus = async () => {
+    try {
+      const res = await fetch("/api/onboarding");
+      if (res.ok) {
+        const data = await res.json();
+        if (!data.articleCompleted) {
+          setShowOnboarding(true);
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  const handleOnboardingComplete = async () => {
+    setShowOnboarding(false);
+    try {
+      await fetch("/api/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "article" }),
+      });
+    } catch {
+      // Ignore errors
+    }
+  };
 
   // Fetch signed audio URL when article has audio
   useEffect(() => {
@@ -642,6 +680,13 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           initialWordIndex={initialReadingWordIndex}
         />
       )}
+
+      {/* Article Onboarding Modal */}
+      <ArticleOnboarding
+        open={showOnboarding}
+        onComplete={handleOnboardingComplete}
+        targetLanguage={article.targetLanguage}
+      />
     </div>
   );
 }

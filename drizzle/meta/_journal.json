@@ -43,6 +43,13 @@
       "when": 1768480362583,
       "tag": "0005_tiny_exiles",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1768481191624,
+      "tag": "0006_safe_switch",
+      "breakpoints": true
     }
   ]
 }

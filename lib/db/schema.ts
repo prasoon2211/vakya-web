@@ -15,6 +15,9 @@ export const users = pgTable("users", {
   nativeLanguage: text("native_language").default("English").notNull(),
   targetLanguage: text("target_language").default("German").notNull(),
   cefrLevel: text("cefr_level").default("B1").notNull(),
+  // Onboarding tracking
+  dashboardOnboardingAt: timestamp("dashboard_onboarding_at", { withTimezone: true }),
+  articleOnboardingAt: timestamp("article_onboarding_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
