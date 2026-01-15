@@ -54,13 +54,15 @@ export function ReadingMode({
   const [currentWordIndex, setCurrentWordIndex] = useState(startingWordIndex);
   const [wasPlayingBeforeTap, setWasPlayingBeforeTap] = useState(false);
 
-  // Update current word based on audio time
+  // Update current word based on audio time (only during playback)
+  // When manually navigating via goToWord, we set currentWordIndex directly
+  // and don't want this effect to override it with a potentially imprecise value
   useEffect(() => {
-    if (timestamps.length > 0) {
+    if (timestamps.length > 0 && isPlaying) {
       const wordIndex = findWordAtTime(timestamps, currentTime);
       setCurrentWordIndex(wordIndex);
     }
-  }, [currentTime, timestamps]);
+  }, [currentTime, timestamps, isPlaying]);
 
   // Audio event handlers
   useEffect(() => {
