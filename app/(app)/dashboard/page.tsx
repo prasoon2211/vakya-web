@@ -174,6 +174,16 @@ export default function DashboardPage() {
     }
   };
 
+  // Reset error state when switching tabs
+  const handleTabChange = (tab: InputTab) => {
+    if (tab !== activeTab) {
+      // Clear any error state when switching tabs
+      if (translationState.status === "failed") {
+        setTranslationState({ status: "idle" });
+      }
+      setActiveTab(tab);
+    }
+  };
 
   const handleTranslate = async () => {
     // Validate based on active tab
@@ -443,7 +453,7 @@ export default function DashboardPage() {
             <div className="px-8">
               <div className="flex gap-1 p-1 bg-[#f3ede4] rounded-xl">
                 <button
-                  onClick={() => setActiveTab("url")}
+                  onClick={() => handleTabChange("url")}
                   disabled={isSubmitting}
                   className={cn(
                     "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
@@ -457,7 +467,7 @@ export default function DashboardPage() {
                   URL
                 </button>
                 <button
-                  onClick={() => setActiveTab("text")}
+                  onClick={() => handleTabChange("text")}
                   disabled={isSubmitting}
                   className={cn(
                     "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
@@ -471,7 +481,7 @@ export default function DashboardPage() {
                   Text
                 </button>
                 <button
-                  onClick={() => setActiveTab("pdf")}
+                  onClick={() => handleTabChange("pdf")}
                   disabled={isSubmitting}
                   className={cn(
                     "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
@@ -680,7 +690,7 @@ export default function DashboardPage() {
             {/* Mobile Tabs */}
             <div className="flex gap-1 p-1 bg-[#f3ede4] rounded-xl">
               <button
-                onClick={() => setActiveTab("url")}
+                onClick={() => handleTabChange("url")}
                 disabled={isSubmitting}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",
@@ -694,7 +704,7 @@ export default function DashboardPage() {
                 URL
               </button>
               <button
-                onClick={() => setActiveTab("text")}
+                onClick={() => handleTabChange("text")}
                 disabled={isSubmitting}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",
@@ -708,7 +718,7 @@ export default function DashboardPage() {
                 Text
               </button>
               <button
-                onClick={() => setActiveTab("pdf")}
+                onClick={() => handleTabChange("pdf")}
                 disabled={isSubmitting}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",

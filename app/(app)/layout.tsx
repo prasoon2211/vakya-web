@@ -8,7 +8,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await currentUser();
   const email = user?.emailAddresses?.[0]?.emailAddress;
 
-  if (!isEmailAllowed(email)) {
+  if (!(await isEmailAllowed(email))) {
     redirect("/not-authorized");
   }
 

@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { db, users } from "@/lib/db";
 import { eq } from "drizzle-orm";
@@ -11,14 +11,20 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const user = await db.query.users.findFirst({
-      where: eq(users.clerkId, userId),
-      columns: {
-        nativeLanguage: true,
-        targetLanguage: true,
-        cefrLevel: true,
-      },
-    });
+    const [user, clerkUser] = await Promise.all([
+      db.query.users.findFirst({
+        where: eq(users.clerkId, userId),
+        columns: {
+          nativeLanguage: true,
+          targetLanguage: true,
+          cefrLevel: true,
+        },
+      }),
+      currentUser(),
+    ]);
+
+    const privateMetadata = clerkUser?.privateMetadata as { role?: string } | undefined;
+    const isAdmin = privateMetadata?.role === "admin";
 
     if (!user) {
       // User might not exist yet, return defaults
@@ -26,10 +32,11 @@ export async function GET() {
         nativeLanguage: "English",
         targetLanguage: "German",
         cefrLevel: "B1",
+        isAdmin,
       });
     }
 
-    return NextResponse.json(user);
+    return NextResponse.json({ ...user, isAdmin });
   } catch (error) {
     console.error("Error fetching settings:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

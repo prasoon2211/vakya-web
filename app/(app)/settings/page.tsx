@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
-import { Settings, Globe, BookOpen, Save, Download, Loader2 } from "lucide-react";
+import { Settings, Globe, BookOpen, Save, Download, Loader2, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -22,6 +23,7 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Settings state
   const [nativeLanguage, setNativeLanguage] = useState("English");
@@ -40,6 +42,7 @@ export default function SettingsPage() {
         setNativeLanguage(data.nativeLanguage || "English");
         setTargetLanguage(data.targetLanguage || "German");
         setCefrLevel(data.cefrLevel || "B1");
+        setIsAdmin(data.isAdmin || false);
       }
     } catch (error) {
       console.error("Failed to fetch settings:", error);
@@ -310,6 +313,27 @@ export default function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* Admin Section - only shown to admins */}
+        {isAdmin && (
+          <Card className="border-[#c45c3e]/20 bg-[#c45c3e]/5">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5 text-[#c45c3e]" />
+                Admin
+              </CardTitle>
+              <CardDescription>Manage users and app settings</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/admin">
+                <Button variant="outline" className="w-full justify-start">
+                  <Shield className="h-4 w-4 mr-2" />
+                  Open Admin Panel
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Save Button */}
         <Button

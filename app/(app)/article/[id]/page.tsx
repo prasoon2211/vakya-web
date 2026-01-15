@@ -345,8 +345,9 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const isTranslationFailed = article.status === "failed";
   const hasContent = blocks.length > 0;
 
-  // Check if this is original content (source = target, no translation happened)
-  const isOriginalContent = article.sourceLanguage?.toLowerCase() === article.targetLanguage.toLowerCase();
+  // For same-language translations (e.g., German → German B1), we still show all tabs
+  // since we have simplified content + English bridge + original source
+  // isOriginalContent should be false to enable the full three-tab experience
 
   // If fetching with no content, show loading state
   if (article.status === "fetching" && !hasContent) {
@@ -583,7 +584,6 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
             blocks={blocks}
             targetLanguage={article.targetLanguage}
             articleId={article.id}
-            isOriginalContent={isOriginalContent}
             hasAudioPlayer={!!signedAudioUrl}
           />
         ) : (

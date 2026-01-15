@@ -21,7 +21,6 @@ interface TranslatedTextProps {
   articleId: string;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
-  isOriginalContent?: boolean; // When source = target, hide toggle hints
   hasAudioPlayer?: boolean; // Whether full audio player is showing (affects mobile toggle position)
 }
 
@@ -207,7 +206,6 @@ export function TranslatedText({
   articleId,
   viewMode: externalViewMode = "target",
   onViewModeChange,
-  isOriginalContent = false,
   hasAudioPlayer = false,
 }: TranslatedTextProps) {
   const [internalViewMode, setInternalViewMode] = useState<ViewMode>(externalViewMode);
@@ -225,9 +223,9 @@ export function TranslatedText({
   const viewMode = onViewModeChange ? externalViewMode : internalViewMode;
   const setViewMode = onViewModeChange || setInternalViewMode;
 
-  // Desktop: Handle Cmd/Ctrl key for quick view switching (skip if original content)
+  // Desktop: Handle Cmd/Ctrl key for quick view switching
   useEffect(() => {
-    if (isMobile || isOriginalContent) return;
+    if (isMobile) return;
 
     let originalMode: ViewMode = "target";
 
@@ -265,12 +263,12 @@ export function TranslatedText({
       window.removeEventListener("keydown", handleGlobalKeyDown);
       window.removeEventListener("keyup", handleGlobalKeyUp);
     };
-  }, [isMobile, isOriginalContent, hasBridge, viewMode, setViewMode]);
+  }, [isMobile, hasBridge, viewMode, setViewMode]);
 
   return (
     <div className="max-w-none">
       {/* Desktop: Floating toggle on right side */}
-      {!isOriginalContent && !isMobile && (
+      {!isMobile && (
         <DesktopViewToggle
           mode={viewMode}
           onModeChange={setViewMode}
@@ -280,7 +278,7 @@ export function TranslatedText({
       )}
 
       {/* Mobile: Floating toggle in bottom-right corner */}
-      {!isOriginalContent && isMobile && (
+      {isMobile && (
         <MobileViewToggle
           mode={viewMode}
           onModeChange={setViewMode}

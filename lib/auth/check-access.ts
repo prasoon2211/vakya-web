@@ -18,7 +18,7 @@ export async function checkAccess(): Promise<NextResponse | null> {
 
   const email = user.emailAddresses?.[0]?.emailAddress;
 
-  if (!isEmailAllowed(email)) {
+  if (!(await isEmailAllowed(email))) {
     return NextResponse.json(
       { error: "Access restricted. Please contact the site owner." },
       { status: 403 }

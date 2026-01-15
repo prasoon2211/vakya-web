@@ -91,6 +91,23 @@ export const savedWords = pgTable(
   ]
 );
 
+// Allowlist for app access control
+export const allowlist = pgTable(
+  "allowlist",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entry: text("entry").notNull().unique(), // email or domain
+    type: text("type").notNull(), // 'email' | 'domain'
+    notes: text("notes"), // optional notes about why this entry was added
+    addedBy: text("added_by"), // clerk ID of admin who added
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_allowlist_entry").on(table.entry),
+    index("idx_allowlist_type").on(table.type),
+  ]
+);
+
 // Cache for AI word translations (reusable across users)
 export const wordCache = pgTable(
   "word_cache",
@@ -120,6 +137,12 @@ export type SavedWord = typeof savedWords.$inferSelect;
 export type NewSavedWord = typeof savedWords.$inferInsert;
 export type WordCache = typeof wordCache.$inferSelect;
 export type NewWordCache = typeof wordCache.$inferInsert;
+export type Allowlist = typeof allowlist.$inferSelect;
+export type NewAllowlist = typeof allowlist.$inferInsert;
+
+// Allowlist entry types
+export const ALLOWLIST_TYPES = ["email", "domain"] as const;
+export type AllowlistType = typeof ALLOWLIST_TYPES[number];
 
 export type CEFRLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 

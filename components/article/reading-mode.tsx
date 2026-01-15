@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { X, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReadingModeText } from "./reading-mode-text";
 import { findWordAtTime, WordTimestamp } from "@/lib/audio/align-timestamps";
 import { cn } from "@/lib/utils";
@@ -329,105 +330,143 @@ export function ReadingMode({
         </div>
 
         {/* Playback controls - properly aligned */}
-        <div className="flex items-center justify-center">
-          <div className="flex items-center gap-1">
-            {/* Previous sentence */}
-            <div className="flex flex-col items-center">
-              <button
-                onClick={goToPreviousSentence}
-                disabled={currentWordIndex === 0}
-                className={cn(
-                  "p-2.5 rounded-full transition-all",
-                  currentWordIndex === 0
-                    ? "text-[#d4c5b5] cursor-not-allowed"
-                    : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
-                )}
-                title="Previous sentence (Shift + ←)"
-              >
-                <ChevronsLeft className="h-5 w-5" />
-              </button>
-              <span className="text-[10px] text-[#9a9a9a] mt-0.5">sentence</span>
-            </div>
+        <TooltipProvider delayDuration={200}>
+          <div className="flex items-center justify-center">
+            <div className="flex items-center gap-1">
+              {/* Previous sentence */}
+              <div className="flex flex-col items-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={goToPreviousSentence}
+                      disabled={currentWordIndex === 0}
+                      className={cn(
+                        "p-2.5 rounded-full transition-all",
+                        currentWordIndex === 0
+                          ? "text-[#d4c5b5] cursor-not-allowed"
+                          : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
+                      )}
+                    >
+                      <ChevronsLeft className="h-5 w-5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <span className="flex items-center gap-1.5">
+                      <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[11px]">Shift</kbd>
+                      <span>+</span>
+                      <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[11px]">←</kbd>
+                    </span>
+                  </TooltipContent>
+                </Tooltip>
+                <span className="text-[10px] text-[#9a9a9a] mt-0.5">sentence</span>
+              </div>
 
-            {/* Previous word */}
-            <div className="flex flex-col items-center">
-              <button
-                onClick={goToPreviousWord}
-                disabled={currentWordIndex === 0}
-                className={cn(
-                  "p-2.5 rounded-full transition-all",
-                  currentWordIndex === 0
-                    ? "text-[#d4c5b5] cursor-not-allowed"
-                    : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
-                )}
-                title="Previous word (←)"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <span className="text-[10px] text-[#9a9a9a] mt-0.5">word</span>
-            </div>
+              {/* Previous word */}
+              <div className="flex flex-col items-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={goToPreviousWord}
+                      disabled={currentWordIndex === 0}
+                      className={cn(
+                        "p-2.5 rounded-full transition-all",
+                        currentWordIndex === 0
+                          ? "text-[#d4c5b5] cursor-not-allowed"
+                          : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
+                      )}
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[11px]">←</kbd>
+                  </TooltipContent>
+                </Tooltip>
+                <span className="text-[10px] text-[#9a9a9a] mt-0.5">word</span>
+              </div>
 
-            {/* Play/Pause */}
-            <div className="flex flex-col items-center mx-3">
-              <Button
-                onClick={togglePlay}
-                size="icon"
-                className="h-14 w-14 rounded-full shadow-md shadow-[#c45c3e]/20"
-                title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-              >
-                {isPlaying ? (
-                  <Pause className="h-6 w-6" />
-                ) : (
-                  <Play className="h-6 w-6 ml-0.5" />
-                )}
-              </Button>
-              <span className="text-[10px] text-transparent mt-0.5 select-none">play</span>
-            </div>
+              {/* Play/Pause */}
+              <div className="flex flex-col items-center mx-3">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={togglePlay}
+                      size="icon"
+                      className="h-14 w-14 rounded-full shadow-md shadow-[#c45c3e]/20"
+                    >
+                      {isPlaying ? (
+                        <Pause className="h-6 w-6" />
+                      ) : (
+                        <Play className="h-6 w-6 ml-0.5" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[11px]">Space</kbd>
+                  </TooltipContent>
+                </Tooltip>
+                <span className="text-[10px] text-transparent mt-0.5 select-none">play</span>
+              </div>
 
-            {/* Next word */}
-            <div className="flex flex-col items-center">
-              <button
-                onClick={goToNextWord}
-                disabled={currentWordIndex === timestamps.length - 1}
-                className={cn(
-                  "p-2.5 rounded-full transition-all",
-                  currentWordIndex === timestamps.length - 1
-                    ? "text-[#d4c5b5] cursor-not-allowed"
-                    : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
-                )}
-                title="Next word (→)"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-              <span className="text-[10px] text-[#9a9a9a] mt-0.5">word</span>
-            </div>
+              {/* Next word */}
+              <div className="flex flex-col items-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={goToNextWord}
+                      disabled={currentWordIndex === timestamps.length - 1}
+                      className={cn(
+                        "p-2.5 rounded-full transition-all",
+                        currentWordIndex === timestamps.length - 1
+                          ? "text-[#d4c5b5] cursor-not-allowed"
+                          : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
+                      )}
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[11px]">→</kbd>
+                  </TooltipContent>
+                </Tooltip>
+                <span className="text-[10px] text-[#9a9a9a] mt-0.5">word</span>
+              </div>
 
-            {/* Next sentence */}
-            <div className="flex flex-col items-center">
-              <button
-                onClick={goToNextSentence}
-                disabled={currentWordIndex === timestamps.length - 1}
-                className={cn(
-                  "p-2.5 rounded-full transition-all",
-                  currentWordIndex === timestamps.length - 1
-                    ? "text-[#d4c5b5] cursor-not-allowed"
-                    : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
-                )}
-                title="Next sentence (Shift + →)"
-              >
-                <ChevronsRight className="h-5 w-5" />
-              </button>
-              <span className="text-[10px] text-[#9a9a9a] mt-0.5">sentence</span>
+              {/* Next sentence */}
+              <div className="flex flex-col items-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={goToNextSentence}
+                      disabled={currentWordIndex === timestamps.length - 1}
+                      className={cn(
+                        "p-2.5 rounded-full transition-all",
+                        currentWordIndex === timestamps.length - 1
+                          ? "text-[#d4c5b5] cursor-not-allowed"
+                          : "text-[#6b6b6b] hover:text-[#1a1a1a] hover:bg-[#f3ede4]"
+                      )}
+                    >
+                      <ChevronsRight className="h-5 w-5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <span className="flex items-center gap-1.5">
+                      <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[11px]">Shift</kbd>
+                      <span>+</span>
+                      <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[11px]">→</kbd>
+                    </span>
+                  </TooltipContent>
+                </Tooltip>
+                <span className="text-[10px] text-[#9a9a9a] mt-0.5">sentence</span>
+              </div>
             </div>
           </div>
-        </div>
+        </TooltipProvider>
 
-        {/* Keyboard hints - desktop only */}
-        <div className="hidden sm:flex justify-center gap-6 mt-4 text-[#9a9a9a] text-xs">
-          <span><kbd className="px-1.5 py-0.5 bg-[#f3ede4] rounded border border-[#e8dfd3] text-[#6b6b6b]">Space</kbd> Play/Pause</span>
-          <span><kbd className="px-1.5 py-0.5 bg-[#f3ede4] rounded border border-[#e8dfd3] text-[#6b6b6b]">←</kbd> <kbd className="px-1.5 py-0.5 bg-[#f3ede4] rounded border border-[#e8dfd3] text-[#6b6b6b]">→</kbd> Word</span>
-          <span><kbd className="px-1.5 py-0.5 bg-[#f3ede4] rounded border border-[#e8dfd3] text-[#6b6b6b]">Shift</kbd>+Arrows Sentence</span>
-        </div>
+        {/* Keyboard hint - desktop only, minimal */}
+        <p className="hidden sm:block text-center text-[#9a9a9a] text-xs mt-4">
+          Hover over buttons for keyboard shortcuts
+        </p>
 
         {/* Mobile hint */}
         <p className="sm:hidden text-center text-[#9a9a9a] text-xs mt-4">
