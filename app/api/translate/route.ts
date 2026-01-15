@@ -4,8 +4,19 @@ import { GoogleGenAI } from "@google/genai";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { db, users, articles } from "@/lib/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { getCefrGuidelines } from "@/lib/cefr-guidelines";
+import {
+  AppError,
+  FetchError,
+  ExtractionError,
+  ContentTooShortError,
+  TranslationError,
+  toAppError,
+  type ArticleStatus,
+} from "@/lib/errors";
+import { handleApiError, unauthorized, badRequest } from "@/lib/api-error-handler";
+import { withTimeout, withRetry } from "@/lib/utils/async";
 
 // Lazy-init Gemini client
 let geminiClient: GoogleGenAI | null = null;
@@ -16,8 +27,68 @@ function getGemini() {
   return geminiClient;
 }
 
-// Timeout wrapper for fetch
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = 30000): Promise<Response> {
+// ============================================================================
+// Types
+// ============================================================================
+
+interface TranslationBlock {
+  original: string;
+  translated: string;
+  bridge?: string;
+}
+
+// ============================================================================
+// Status Update Helper
+// ============================================================================
+
+async function updateArticleStatus(
+  articleId: string,
+  status: ArticleStatus,
+  extras?: {
+    title?: string;
+    originalContent?: string;
+    translatedContent?: string;
+    sourceLanguage?: string;
+    translationProgress?: number;
+    totalParagraphs?: number;
+    wordCount?: number;
+    errorMessage?: string;
+    errorCode?: string;
+  }
+) {
+  await db
+    .update(articles)
+    .set({
+      status,
+      updatedAt: new Date(),
+      ...extras,
+    })
+    .where(eq(articles.id, articleId));
+}
+
+async function markArticleFailed(articleId: string, error: unknown) {
+  const appError = toAppError(error);
+  await db
+    .update(articles)
+    .set({
+      status: "failed",
+      errorMessage: appError.userMessage,
+      errorCode: appError.code,
+      retryCount: sql`${articles.retryCount} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(articles.id, articleId));
+}
+
+// ============================================================================
+// Fetch Logic
+// ============================================================================
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = 30000
+): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -32,31 +103,26 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
   }
 }
 
-// Direct HTML fetch with browser-like headers
-async function fetchHtmlDirect(url: string): Promise<{ html: string; success: boolean; error?: string }> {
+async function fetchHtmlDirect(
+  url: string
+): Promise<{ html: string; success: boolean; error?: string }> {
   try {
-    // Parse URL to get the origin for Referer header
     const urlObj = new URL(url);
-
-    const response = await fetchWithTimeout(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": "en-US,en;q=0.9,fr;q=0.8,de;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br, zstd",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Referer": urlObj.origin,
-        "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"macOS"',
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-User": "?1",
-        "Upgrade-Insecure-Requests": "1",
+    const response = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9,fr;q=0.8,de;q=0.7",
+          "Cache-Control": "no-cache",
+          Referer: urlObj.origin,
+        },
       },
-    }, 30000);
+      30000
+    );
 
     if (!response.ok) {
       return { html: "", success: false, error: `HTTP ${response.status}` };
@@ -74,17 +140,22 @@ async function fetchHtmlDirect(url: string): Promise<{ html: string; success: bo
   }
 }
 
-// Jina AI fetch (fallback)
-async function fetchHtmlViaJina(url: string): Promise<{ html: string; success: boolean; error?: string }> {
+async function fetchHtmlViaJina(
+  url: string
+): Promise<{ html: string; success: boolean; error?: string }> {
   try {
     const jinaUrl = `https://r.jina.ai/${encodeURIComponent(url)}`;
-    const response = await fetchWithTimeout(jinaUrl, {
-      headers: {
-        Authorization: `Bearer ${process.env.JINA_API_KEY}`,
-        Accept: "text/html",
-        "X-Return-Format": "html",
+    const response = await fetchWithTimeout(
+      jinaUrl,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.JINA_API_KEY}`,
+          Accept: "text/html",
+          "X-Return-Format": "html",
+        },
       },
-    }, 45000);
+      45000
+    );
 
     if (!response.ok) {
       return { html: "", success: false, error: `Jina HTTP ${response.status}` };
@@ -102,9 +173,10 @@ async function fetchHtmlViaJina(url: string): Promise<{ html: string; success: b
   }
 }
 
-// Fetch article HTML with fallback strategy
-async function fetchArticleHtml(url: string, articleId: string): Promise<{ html: string; method: string } | null> {
-  // Try direct fetch first
+async function fetchArticleHtml(
+  url: string,
+  articleId: string
+): Promise<{ html: string; method: string }> {
   console.log(`[${articleId}] Trying direct fetch...`);
   const directResult = await fetchHtmlDirect(url);
 
@@ -115,7 +187,6 @@ async function fetchArticleHtml(url: string, articleId: string): Promise<{ html:
 
   console.log(`[${articleId}] Direct fetch failed: ${directResult.error}. Falling back to Jina...`);
 
-  // Fall back to Jina
   const jinaResult = await fetchHtmlViaJina(url);
 
   if (jinaResult.success) {
@@ -124,33 +195,25 @@ async function fetchArticleHtml(url: string, articleId: string): Promise<{ html:
   }
 
   console.log(`[${articleId}] Jina fetch also failed: ${jinaResult.error}`);
-  return null;
+  throw new FetchError(url, `Direct: ${directResult.error}, Jina: ${jinaResult.error}`);
 }
 
-interface TranslationBlock {
-  original: string;
-  translated: string;
-  bridge?: string; // 1-1 English translation of the translated text
-}
+// ============================================================================
+// Content Extraction
+// ============================================================================
 
-// Extract main article content using Readability
-function extractArticleContent(html: string, url: string): { title: string; content: string } | null {
+function extractArticleContent(
+  html: string,
+  url: string
+): { title: string; content: string } | null {
   try {
-    console.log(`[Readability] Input HTML length: ${html.length} bytes`);
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
 
-    if (!article) {
-      console.log(`[Readability] parse() returned null`);
-      return null;
-    }
+    if (!article) return null;
 
     const content = article.textContent || "";
-    console.log(`[Readability] Extracted title: "${article.title}"`);
-    console.log(`[Readability] Extracted content length: ${content.length} chars`);
-    console.log(`[Readability] Content preview: ${content.slice(0, 200)}...`);
-
     return {
       title: article.title || "Untitled",
       content,
@@ -161,155 +224,117 @@ function extractArticleContent(html: string, url: string): { title: string; cont
   }
 }
 
-// Site-specific configurations for problematic websites
+// ============================================================================
+// Site-Specific Configurations
+// ============================================================================
+
 interface SiteConfig {
-  // Match patterns (hostname includes)
   patterns: string[];
-  // Don't chunk - send full article to AI in one request
   noChunk?: boolean;
-  // Skip Readability extraction - pass raw HTML to AI instead
   skipReadability?: boolean;
-  // When true, AI returns cleaned original text (useful when sending raw HTML)
   returnCleanOriginal?: boolean;
-  // Custom extraction hints (future use)
-  extractionHints?: string;
 }
 
 const SITE_CONFIGS: SiteConfig[] = [
   {
-    // Le Monde: Readability often fails or extracts poorly
-    // Skip Readability entirely, send raw HTML to AI for extraction
-    patterns: ['lemonde.fr'],
+    patterns: ["lemonde.fr"],
     noChunk: true,
     skipReadability: true,
-    returnCleanOriginal: true, // AI returns cleaned original text
+    returnCleanOriginal: true,
   },
-  // Add more problematic sites here as needed:
-  // {
-  //   patterns: ['nytimes.com'],
-  //   noChunk: true,
-  // },
 ];
 
 function getSiteConfig(url: string): SiteConfig | null {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
-    return SITE_CONFIGS.find(config =>
-      config.patterns.some(pattern => hostname.includes(pattern))
-    ) || null;
+    return (
+      SITE_CONFIGS.find((config) =>
+        config.patterns.some((pattern) => hostname.includes(pattern))
+      ) || null
+    );
   } catch {
     return null;
   }
 }
 
-// Smart paragraph chunking for optimal translation
+// ============================================================================
+// Chunking Logic
+// ============================================================================
+
 const CHUNK_CONFIG = {
-  MIN_WORDS: 50,      // Merge chunks smaller than this
-  TARGET_WORDS: 250,  // Ideal chunk size
-  MAX_WORDS: 500,     // Split chunks larger than this
+  MIN_WORDS: 50,
+  TARGET_WORDS: 250,
+  MAX_WORDS: 500,
 };
 
 function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(w => w.length > 0).length;
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0).length;
 }
 
 function splitAtSentences(text: string, maxWords: number): string[] {
-  // Step 1: Normalize text - add space after sentence-ending punctuation if followed by capital letter
-  // This fixes Readability stripping whitespace (e.g., "time.Ten days" -> "time. Ten days")
   const normalizedText = text
-    .replace(/([.!?])([A-Z])/g, '$1 $2')  // "time.Ten" -> "time. Ten"
-    .replace(/([.!?])(["'])([A-Z])/g, '$1$2 $3');  // 'said."He' -> 'said." He'
+    .replace(/([.!?])([A-Z])/g, "$1 $2")
+    .replace(/([.!?])(["'])([A-Z])/g, "$1$2 $3");
 
-  console.log(`[splitAtSentences] Input: ${countWords(text)} words, normalized length: ${normalizedText.length}`);
-
-  // Step 2: Split on sentence boundaries (punctuation followed by space)
-  // Simpler pattern now that text is normalized
   const sentencePattern = /[^.!?]*[.!?]+[\s]*/g;
   const matches: string[] = normalizedText.match(sentencePattern) || [];
 
-  // Step 3: CRITICAL - capture any remaining text that didn't match
-  // This prevents losing content that doesn't end with punctuation
-  const matchedLength = matches.join('').length;
+  const matchedLength = matches.join("").length;
   if (matchedLength < normalizedText.length) {
     const remaining = normalizedText.slice(matchedLength).trim();
-    if (remaining) {
-      matches.push(remaining);
-      console.log(`[splitAtSentences] Captured ${countWords(remaining)} words of unmatched trailing text`);
-    }
+    if (remaining) matches.push(remaining);
   }
 
-  // Step 4: Fallback - if nothing matched, return original text as single chunk
   const sentences = matches.length > 0 ? matches : [text];
-
-  const totalMatchedWords = sentences.reduce((sum, s) => sum + countWords(s), 0);
-  console.log(`[splitAtSentences] Result: ${sentences.length} sentences, ${totalMatchedWords} total words`);
-
-  // Step 5: Group sentences into chunks of ~maxWords
   const chunks: string[] = [];
-  let current = '';
+  let current = "";
   let currentWords = 0;
 
   for (const sentence of sentences) {
     const sentenceWords = countWords(sentence);
-
     if (currentWords + sentenceWords <= maxWords) {
       current += sentence;
       currentWords += sentenceWords;
     } else {
-      if (current.trim()) {
-        chunks.push(current.trim());
-      }
+      if (current.trim()) chunks.push(current.trim());
       current = sentence;
       currentWords = sentenceWords;
     }
   }
 
-  if (current.trim()) {
-    chunks.push(current.trim());
-  }
-
+  if (current.trim()) chunks.push(current.trim());
   return chunks;
 }
 
 function smartChunkContent(content: string): string[] {
   const { MIN_WORDS, TARGET_WORDS, MAX_WORDS } = CHUNK_CONFIG;
 
-  console.log(`[Chunking] Input content length: ${content.length} chars, ${countWords(content)} words`);
-
-  // Step 1: Split on natural paragraph boundaries
   let segments = content
     .split(/\n\n+/)
-    .map(p => p.trim())
-    .filter(p => p.length > 0);
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
 
-  console.log(`[Chunking] After double-newline split: ${segments.length} segments`);
-
-  // If no double newlines, try single newlines for very long content
   if (segments.length <= 1 && countWords(content) > MAX_WORDS) {
-    console.log(`[Chunking] Only 1 segment with ${countWords(content)} words > MAX_WORDS (${MAX_WORDS}), trying single newline split`);
     segments = content
       .split(/\n+/)
-      .map(p => p.trim())
-      .filter(p => p.length > 0);
-    console.log(`[Chunking] After single-newline split: ${segments.length} segments`);
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
   }
 
-  // Step 2: Split oversized segments at sentence boundaries
-  segments = segments.flatMap(segment => {
+  segments = segments.flatMap((segment) => {
     const words = countWords(segment);
-    if (words <= MAX_WORDS) {
-      return [segment];
-    }
+    if (words <= MAX_WORDS) return [segment];
     return splitAtSentences(segment, TARGET_WORDS);
   });
 
-  // Step 3: Merge small segments with neighbors
   const merged: string[] = [];
-  let buffer = '';
+  let buffer = "";
   let bufferWords = 0;
 
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
+  for (const segment of segments) {
     const segmentWords = countWords(segment);
 
     if (buffer.length === 0) {
@@ -319,33 +344,24 @@ function smartChunkContent(content: string): string[] {
     }
 
     const shouldMerge =
-      // Merge if buffer is small
       bufferWords < MIN_WORDS ||
-      // Merge if segment is small
       segmentWords < MIN_WORDS ||
-      // Merge if combined is still under target and both are small-ish
-      (bufferWords < TARGET_WORDS && segmentWords < TARGET_WORDS && bufferWords + segmentWords <= MAX_WORDS);
+      (bufferWords < TARGET_WORDS &&
+        segmentWords < TARGET_WORDS &&
+        bufferWords + segmentWords <= MAX_WORDS);
 
     if (shouldMerge && bufferWords + segmentWords <= MAX_WORDS) {
-      // Merge with double newline to preserve some structure
-      buffer = buffer + '\n\n' + segment;
+      buffer = buffer + "\n\n" + segment;
       bufferWords += segmentWords;
     } else {
-      // Push buffer and start new one
-      if (buffer.trim()) {
-        merged.push(buffer.trim());
-      }
+      if (buffer.trim()) merged.push(buffer.trim());
       buffer = segment;
       bufferWords = segmentWords;
     }
   }
 
-  // Don't forget the last buffer
-  if (buffer.trim()) {
-    merged.push(buffer.trim());
-  }
+  if (buffer.trim()) merged.push(buffer.trim());
 
-  // Step 4: Final pass - if we still have very small chunks at the end, merge with previous
   if (merged.length > 1) {
     const lastChunk = merged[merged.length - 1];
     const lastWords = countWords(lastChunk);
@@ -353,47 +369,43 @@ function smartChunkContent(content: string): string[] {
       const secondLast = merged[merged.length - 2];
       const secondLastWords = countWords(secondLast);
       if (secondLastWords + lastWords <= MAX_WORDS) {
-        merged[merged.length - 2] = secondLast + '\n\n' + lastChunk;
+        merged[merged.length - 2] = secondLast + "\n\n" + lastChunk;
         merged.pop();
       }
     }
   }
 
-  // Filter out any empty chunks
-  const finalChunks = merged.filter(chunk => chunk.trim().length > 0);
-  console.log(`[Chunking] Final result: ${finalChunks.length} chunks with word counts: ${finalChunks.map(c => countWords(c)).join(', ')}`);
-  return finalChunks;
+  return merged.filter((chunk) => chunk.trim().length > 0);
 }
 
-// Detect the language of text using Gemini
+// ============================================================================
+// Language Detection
+// ============================================================================
+
 async function detectLanguage(text: string): Promise<string> {
   const gemini = getGemini();
-  if (!gemini) {
-    console.error("Gemini client not available for language detection");
-    return "Unknown";
-  }
+  if (!gemini) return "Unknown";
 
-  // Use first 500 chars for detection (faster, usually enough)
   const sample = text.slice(0, 500);
-
-  const prompt = `Detect the language of the following text. Return ONLY the language name in English (e.g., "German", "French", "Spanish", "English", "Italian", etc.). No explanation, just the language name.
+  const prompt = `Detect the language of the following text. Return ONLY the language name in English (e.g., "German", "French", "Spanish"). No explanation.
 
 Text:
 ${sample}`;
 
   try {
-    const response = await gemini.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    });
+    const response = await withTimeout(
+      gemini.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { thinkingConfig: { thinkingBudget: 0 } },
+      }),
+      30000,
+      "Language detection"
+    );
 
     const detected = response.text?.trim();
     if (detected) {
-      // Normalize common variations
-      const normalized = detected.replace(/[^a-zA-Z]/g, '');
+      const normalized = detected.replace(/[^a-zA-Z]/g, "");
       return normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
     }
   } catch (error) {
@@ -403,7 +415,10 @@ ${sample}`;
   return "Unknown";
 }
 
-// Translate a single chunk of text using Gemini 3 Flash
+// ============================================================================
+// Translation
+// ============================================================================
+
 async function translateChunk(
   text: string,
   targetLanguage: string,
@@ -412,148 +427,77 @@ async function translateChunk(
 ): Promise<TranslationBlock> {
   const gemini = getGemini();
   if (!gemini) {
-    console.error("Gemini client not available - missing GOOGLE_AI_API_KEY");
+    console.error("Gemini client not available");
     return { original: text, translated: text };
   }
 
-  // Get comprehensive CEFR guidelines (generic + language-specific)
   const levelGuidelines = getCefrGuidelines(targetLanguage, cefrLevel);
-
-  // Determine output format based on options
   const returnCleanOriginal = options?.returnCleanOriginal ?? false;
 
   const outputInstructions = returnCleanOriginal
     ? `Return JSON format:
 {
-  "original": "the CLEAN extracted article text in the SOURCE language (no HTML, no garbage - just the article paragraphs)",
+  "original": "the CLEAN extracted article text in the SOURCE language",
   "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level",
   "bridge": "English translation that maps EXACTLY 1-1 to your translated text"
-}
-
-IMPORTANT:
-- The "original" field must contain the clean, readable source article text - NOT HTML, NOT a summary.
-- The "bridge" field must have the SAME NUMBER OF SENTENCES as "translated", in the same order.
-- Each bridge sentence should be the direct English meaning of the corresponding translated sentence.`
+}`
     : `Return JSON format:
 {
   "original": "the source text you received (preserve it exactly)",
   "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level",
   "bridge": "English translation that maps EXACTLY 1-1 to your translated text"
-}
+}`;
 
-IMPORTANT:
-- The "original" field must contain the input text you received - preserve it, do NOT summarize.
-- The "bridge" field must have the SAME NUMBER OF SENTENCES as "translated", in the same order.
-- Each bridge sentence should be the direct English meaning of the corresponding translated sentence.`;
-
-  const prompt = `You are a professional language learning content adapter. Your job is to extract article content and translate/adapt it into ${targetLanguage} for a ${cefrLevel} learner.
+  const prompt = `You are a professional language learning content adapter. Translate/adapt the following into ${targetLanguage} for a ${cefrLevel} learner.
 
 ${levelGuidelines}
 
----
-
-## CONTENT EXTRACTION RULES
-
-The input may be either:
-- Raw HTML from a news website (extract the article text, ignore all HTML tags/markup)
-- Plain text that's already been extracted
-
-From either format, extract ONLY the main article content.
-
-INCLUDE (extract and translate):
-- News paragraphs and journalism
-- Quotes and statements from people
-- Factual information and reporting
-- Analysis and commentary
-- ALL important details, quotes, and context from the article
-
-EXCLUDE completely (ignore, do not translate):
-- HTML tags, scripts, styles, metadata
-- Subscription/paywall prompts
-- Login/signup requests
-- Navigation, menus, footers
-- Cookie notices
-- Social media buttons
-- "Read also" / "Lire aussi" links
-- Advertisements
-
-If the input contains ONLY non-article content, return: {"original": "", "translated": ""}
-
----
-
-## YOUR TASK
-
-1. If input is HTML: extract the article text first (ignore all HTML markup)
-2. Identify ALL key points, quotes, and facts from the article
-3. Translate/adapt into ${targetLanguage} at ${cefrLevel} level
-4. Apply ALL grammar and vocabulary constraints from the guidelines above
-5. IMPORTANT: Capture all significant information - don't over-summarize
+## CONTENT RULES
+INCLUDE: News paragraphs, quotes, factual information, analysis
+EXCLUDE: HTML tags, subscription prompts, navigation, ads, "Read also" links
 
 ${outputInstructions}
-
----
 
 INPUT:
 ${text}`;
 
   try {
-    const response = await gemini.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
+    const response = await withTimeout(
+      gemini.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      }),
+      60000,
+      "Translation"
+    );
 
     const content = response.text;
     if (content) {
-      try {
-        const parsed = JSON.parse(content);
-        if (parsed.translated) {
-          // Use AI's cleaned original if returnCleanOriginal is enabled and AI provided it
-          const originalText = (returnCleanOriginal && parsed.original && parsed.original.length > 50)
+      const parsed = JSON.parse(content);
+      if (parsed.translated) {
+        const originalText =
+          returnCleanOriginal && parsed.original && parsed.original.length > 50
             ? parsed.original
             : text;
-          return {
-            original: originalText,
-            translated: parsed.translated,
-            bridge: parsed.bridge || undefined, // 1-1 English translation
-          };
-        }
-      } catch {
-        // If parsing fails, return original as translated (fallback)
-        console.error("Failed to parse AI response as JSON");
+        return {
+          original: originalText,
+          translated: parsed.translated,
+          bridge: parsed.bridge || undefined,
+        };
       }
     }
   } catch (error) {
-    console.error("Gemini translation error:", error);
+    console.error("Translation chunk error:", error);
   }
 
-  // Fallback: return original text as translation (no bridge available)
   return { original: text, translated: text };
 }
 
-// Wrapper for backward compatibility (translates array of chunks)
-async function translateBatch(
-  batch: string[],
-  targetLanguage: string,
-  cefrLevel: string,
-  options?: { returnCleanOriginal?: boolean }
-): Promise<TranslationBlock[]> {
-  // For single chunk (our main use case now), call directly
-  if (batch.length === 1) {
-    const result = await translateChunk(batch[0], targetLanguage, cefrLevel, options);
-    return [result];
-  }
+// ============================================================================
+// Background Processing
+// ============================================================================
 
-  // For multiple chunks, translate each
-  const results = await Promise.all(
-    batch.map(chunk => translateChunk(chunk, targetLanguage, cefrLevel, options))
-  );
-  return results;
-}
-
-// Background translation worker
 async function processTranslation(
   articleId: string,
   sourceUrl: string,
@@ -566,202 +510,159 @@ async function processTranslation(
   let translatedBlocks = [...existingBlocks];
   let title = "Untitled";
 
-  // Check for site-specific config (used in both Phase 1 and Phase 2)
   const siteConfig = getSiteConfig(sourceUrl);
 
   try {
     // Phase 1: Fetch content if needed
     if (paragraphs.length === 0) {
+      await updateArticleStatus(articleId, "fetching");
       console.log(`[${articleId}] Fetching article from ${sourceUrl}`);
-
-      if (siteConfig) {
-        console.log(`[${articleId}] Site config found for ${new URL(sourceUrl).hostname}: noChunk=${siteConfig.noChunk}, skipReadability=${siteConfig.skipReadability}, returnCleanOriginal=${siteConfig.returnCleanOriginal}`);
-      }
 
       const fetchResult = await fetchArticleHtml(sourceUrl, articleId);
 
-      if (!fetchResult) {
-        await db
-          .update(articles)
-          .set({ status: "failed", errorMessage: "Failed to fetch article content from both direct and Jina methods" })
-          .where(eq(articles.id, articleId));
-        return;
-      }
+      // Phase 2: Extract content
+      await updateArticleStatus(articleId, "extracting");
 
       let contentForTranslation: string;
 
-      // For sites where Readability fails/is problematic, pass raw HTML to AI
       if (siteConfig?.skipReadability) {
-        console.log(`[${articleId}] Skipping Readability - passing HTML directly to AI (${fetchResult.html.length} bytes)`);
-        // Pass the raw HTML - AI will extract the article content
+        console.log(`[${articleId}] Skipping Readability - passing HTML to AI`);
         contentForTranslation = fetchResult.html;
-        // Try to extract title from HTML
         const titleMatch = fetchResult.html.match(/<title[^>]*>([^<]+)<\/title>/i);
-        title = titleMatch ? titleMatch[1].replace(/\s*[-|].*$/, '').trim() : "Untitled";
+        title = titleMatch ? titleMatch[1].replace(/\s*[-|].*$/, "").trim() : "Untitled";
       } else {
-        // Normal path: Use Readability for extraction
-        console.log(`[${articleId}] Extracting with Readability...`);
-        const extractStart = Date.now();
         const extracted = extractArticleContent(fetchResult.html, sourceUrl);
-        console.log(`[${articleId}] Readability took ${Date.now() - extractStart}ms`);
 
-        if (!extracted || !extracted.content || extracted.content.length < 100) {
-          await db
-            .update(articles)
-            .set({ status: "failed", errorMessage: "Article content too short or couldn't be extracted" })
-            .where(eq(articles.id, articleId));
-          return;
+        if (!extracted || !extracted.content) {
+          throw new ExtractionError("Readability returned no content");
+        }
+
+        if (extracted.content.length < 100) {
+          throw new ContentTooShortError(extracted.content.length, 100);
         }
 
         title = extracted.title;
         contentForTranslation = extracted.content;
       }
 
-      // Chunk or not based on site config
+      // Phase 3: Detect language
+      await updateArticleStatus(articleId, "detecting", { title });
+      console.log(`[${articleId}] Detecting source language...`);
+
+      const textSample = siteConfig?.skipReadability
+        ? contentForTranslation.replace(/<[^>]+>/g, " ").slice(0, 1000)
+        : contentForTranslation.slice(0, 1000);
+      const sourceLanguage = await detectLanguage(textSample);
+      console.log(`[${articleId}] Detected: ${sourceLanguage}`);
+
+      // Chunk content
       if (siteConfig?.noChunk) {
-        // Problematic site - send full content as single chunk
         paragraphs = [contentForTranslation];
-        console.log(`[${articleId}] Site config: noChunk=true`);
-        console.log(`[${articleId}] Sending full content as single chunk: ${contentForTranslation.length} chars`);
       } else {
-        // Normal site - smart chunk for parallel processing
         paragraphs = smartChunkContent(contentForTranslation);
-        console.log(`[${articleId}] Smart chunking: ${countWords(contentForTranslation)} words → ${paragraphs.length} chunks`);
-        console.log(`[${articleId}] Chunk sizes: ${paragraphs.map(p => countWords(p)).join(', ')} words`);
       }
 
-      // Detect source language (use first 1000 chars of content, not HTML)
-      const textSample = siteConfig?.skipReadability
-        ? contentForTranslation.replace(/<[^>]+>/g, ' ').slice(0, 1000)
-        : contentForTranslation.slice(0, 1000);
-      console.log(`[${articleId}] Detecting source language...`);
-      const detectStart = Date.now();
-      const sourceLanguage = await detectLanguage(textSample);
-      console.log(`[${articleId}] Detected source language: ${sourceLanguage} (took ${Date.now() - detectStart}ms)`);
-
-      // Note: Even if source = target, we still process through AI to:
-      // 1. Clean garbage (paywall messages, navigation, etc.)
-      // 2. Adjust complexity for CEFR level
+      console.log(`[${articleId}] ${paragraphs.length} chunks to translate`);
 
       // Save original content and update status
-      await db
-        .update(articles)
-        .set({
-          title,
-          originalContent: JSON.stringify(paragraphs),
-          sourceLanguage,
-          status: "translating",
-          totalParagraphs: paragraphs.length,
-          translationProgress: 0,
-        })
-        .where(eq(articles.id, articleId));
-
-      console.log(`[${articleId}] Extracted ${paragraphs.length} paragraphs`);
+      await updateArticleStatus(articleId, "translating", {
+        title,
+        originalContent: JSON.stringify(paragraphs),
+        sourceLanguage,
+        totalParagraphs: paragraphs.length,
+        translationProgress: 0,
+      });
+    } else {
+      // Resuming - just update status
+      await updateArticleStatus(articleId, "translating");
     }
 
-    // Phase 2: Translate in parallel using Gemini 3 Flash
-    // Each chunk gets its own API call for maximum parallelism
-    const MAX_PARALLEL = 15; // 15 parallel requests for speed
+    // Phase 4: Translate in parallel waves
+    const MAX_PARALLEL = 15;
     const startIndex = translatedBlocks.length;
     const remainingParagraphs = paragraphs.slice(startIndex);
 
-    // Update status to translating immediately so UI shows progress
-    if (startIndex === 0) {
-      await db
-        .update(articles)
-        .set({ status: "translating" })
-        .where(eq(articles.id, articleId));
-    }
-
     console.log(`[${articleId}] Starting translation: ${remainingParagraphs.length} chunks remaining`);
 
-    // Process chunks in parallel waves
-    // Each chunk gets its own API call for maximum speed
     for (let i = 0; i < remainingParagraphs.length; i += MAX_PARALLEL) {
       const wave = remainingParagraphs.slice(i, i + MAX_PARALLEL);
-      const waveIndices = wave.map((_, idx) => startIndex + i + idx);
 
-      console.log(`[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, remainingParagraphs.length)} of ${remainingParagraphs.length} (${wave.length} parallel)`);
-
-      // Run parallel translations - each chunk gets its own API call
-      const translateOptions = siteConfig?.returnCleanOriginal ? { returnCleanOriginal: true } : undefined;
-      const results = await Promise.allSettled(
-        wave.map((chunk) => translateBatch([chunk], targetLanguage, cefrLevel, translateOptions))
+      console.log(
+        `[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, remainingParagraphs.length)}`
       );
 
-      // Process results in order
+      const translateOptions = siteConfig?.returnCleanOriginal
+        ? { returnCleanOriginal: true }
+        : undefined;
+
+      const results = await Promise.allSettled(
+        wave.map((chunk) => translateChunk(chunk, targetLanguage, cefrLevel, translateOptions))
+      );
+
       for (let j = 0; j < results.length; j++) {
         const result = results[j];
         const originalChunk = wave[j];
 
-        if (result.status === "fulfilled" && result.value.length > 0) {
-          const block = result.value[0];
-          // Skip blocks where AI determined it was non-article content (empty translation)
+        if (result.status === "fulfilled") {
+          const block = result.value;
           if (block.translated && block.translated.trim().length > 0) {
             translatedBlocks.push(block);
           } else {
-            console.log(`[${articleId}] Chunk ${waveIndices[j] + 1} filtered out (non-article content)`);
+            console.log(`[${articleId}] Chunk filtered (non-article content)`);
           }
         } else {
-          // On failure, use original text as fallback and continue
-          if (result.status === "rejected") {
-            console.error(`[${articleId}] Chunk ${waveIndices[j] + 1} failed:`, result.reason);
-          }
+          console.error(`[${articleId}] Chunk failed:`, result.reason);
           translatedBlocks.push({
             original: originalChunk,
-            translated: originalChunk, // Fallback to original
+            translated: originalChunk,
           });
         }
       }
 
       // Save progress after each wave
-      const progress = Math.min(translatedBlocks.length, paragraphs.length);
+      const progress = Math.min(startIndex + i + MAX_PARALLEL, paragraphs.length);
       await db
         .update(articles)
         .set({
           translatedContent: JSON.stringify(translatedBlocks),
           translationProgress: progress,
+          updatedAt: new Date(),
         })
         .where(eq(articles.id, articleId));
 
       console.log(`[${articleId}] Progress: ${progress}/${paragraphs.length}`);
     }
 
-    // Calculate word count
+    // Calculate word count and mark complete
     const wordCount = translatedBlocks.reduce((acc, block) => {
       return acc + (block.translated?.split(/\s+/).length || 0);
     }, 0);
 
-    // Mark as completed
-    await db
-      .update(articles)
-      .set({
-        translatedContent: JSON.stringify(translatedBlocks),
-        status: "completed",
-        wordCount,
-        translationProgress: paragraphs.length,
-      })
-      .where(eq(articles.id, articleId));
+    await updateArticleStatus(articleId, "completed", {
+      translatedContent: JSON.stringify(translatedBlocks),
+      wordCount,
+      translationProgress: paragraphs.length,
+    });
 
     console.log(`[${articleId}] Translation completed! ${wordCount} words`);
-
   } catch (error) {
     console.error(`[${articleId}] Translation error:`, error);
 
-    // Save progress and mark as failed
-    await db
-      .update(articles)
-      .set({
-        translatedContent: translatedBlocks.length > 0 ? JSON.stringify(translatedBlocks) : null,
-        translationProgress: translatedBlocks.length,
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : "Translation failed. You can retry to continue.",
-      })
-      .where(eq(articles.id, articleId));
+    // Save progress even on failure
+    if (translatedBlocks.length > 0) {
+      await db
+        .update(articles)
+        .set({
+          translatedContent: JSON.stringify(translatedBlocks),
+          translationProgress: translatedBlocks.length,
+        })
+        .where(eq(articles.id, articleId));
+    }
+
+    await markArticleFailed(articleId, error);
   }
 }
 
-// Background translation for text input (simpler - no fetching needed)
 async function processTextTranslation(
   articleId: string,
   paragraphs: string[],
@@ -771,26 +672,29 @@ async function processTextTranslation(
   const translatedBlocks: TranslationBlock[] = [];
 
   try {
+    await updateArticleStatus(articleId, "translating");
+
     const MAX_PARALLEL = 15;
 
     console.log(`[${articleId}] Starting text translation: ${paragraphs.length} chunks`);
 
-    // Process chunks in parallel waves
     for (let i = 0; i < paragraphs.length; i += MAX_PARALLEL) {
       const wave = paragraphs.slice(i, i + MAX_PARALLEL);
 
-      console.log(`[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, paragraphs.length)} of ${paragraphs.length}`);
+      console.log(
+        `[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, paragraphs.length)}`
+      );
 
       const results = await Promise.allSettled(
-        wave.map((chunk) => translateBatch([chunk], targetLanguage, cefrLevel))
+        wave.map((chunk) => translateChunk(chunk, targetLanguage, cefrLevel))
       );
 
       for (let j = 0; j < results.length; j++) {
         const result = results[j];
         const originalChunk = wave[j];
 
-        if (result.status === "fulfilled" && result.value.length > 0) {
-          const block = result.value[0];
+        if (result.status === "fulfilled") {
+          const block = result.value;
           if (block.translated && block.translated.trim().length > 0) {
             translatedBlocks.push(block);
           }
@@ -802,7 +706,34 @@ async function processTextTranslation(
         }
       }
 
-      // Save progress after each wave
+      // Save progress
+      await db
+        .update(articles)
+        .set({
+          translatedContent: JSON.stringify(translatedBlocks),
+          translationProgress: translatedBlocks.length,
+          updatedAt: new Date(),
+        })
+        .where(eq(articles.id, articleId));
+
+      console.log(`[${articleId}] Progress: ${translatedBlocks.length}/${paragraphs.length}`);
+    }
+
+    const wordCount = translatedBlocks.reduce((acc, block) => {
+      return acc + (block.translated?.split(/\s+/).length || 0);
+    }, 0);
+
+    await updateArticleStatus(articleId, "completed", {
+      translatedContent: JSON.stringify(translatedBlocks),
+      wordCount,
+      translationProgress: paragraphs.length,
+    });
+
+    console.log(`[${articleId}] Text translation completed! ${wordCount} words`);
+  } catch (error) {
+    console.error(`[${articleId}] Text translation error:`, error);
+
+    if (translatedBlocks.length > 0) {
       await db
         .update(articles)
         .set({
@@ -810,74 +741,45 @@ async function processTextTranslation(
           translationProgress: translatedBlocks.length,
         })
         .where(eq(articles.id, articleId));
-
-      console.log(`[${articleId}] Progress: ${translatedBlocks.length}/${paragraphs.length}`);
     }
 
-    // Calculate word count and mark complete
-    const wordCount = translatedBlocks.reduce((acc, block) => {
-      return acc + (block.translated?.split(/\s+/).length || 0);
-    }, 0);
-
-    await db
-      .update(articles)
-      .set({
-        translatedContent: JSON.stringify(translatedBlocks),
-        status: "completed",
-        wordCount,
-        translationProgress: paragraphs.length,
-      })
-      .where(eq(articles.id, articleId));
-
-    console.log(`[${articleId}] Text translation completed! ${wordCount} words`);
-
-  } catch (error) {
-    console.error(`[${articleId}] Text translation error:`, error);
-
-    await db
-      .update(articles)
-      .set({
-        translatedContent: translatedBlocks.length > 0 ? JSON.stringify(translatedBlocks) : null,
-        translationProgress: translatedBlocks.length,
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : "Translation failed",
-      })
-      .where(eq(articles.id, articleId));
+    await markArticleFailed(articleId, error);
   }
 }
 
-// POST - Start or resume article translation
-// Supports: URL (default), text input
+// ============================================================================
+// API Handler
+// ============================================================================
+
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return unauthorized();
     }
 
     const body = await request.json();
     const { type = "url", url, text, title, targetLanguage, cefrLevel } = body;
 
-    // Validate based on input type
+    // Validate input
     if (type === "url") {
       if (!url || !targetLanguage || !cefrLevel) {
-        return NextResponse.json(
-          { error: "Missing required fields" },
-          { status: 400 }
-        );
+        return badRequest("Missing required fields: url, targetLanguage, cefrLevel");
+      }
+      try {
+        new URL(url);
+      } catch {
+        return badRequest("Invalid URL format");
       }
     } else if (type === "text") {
       if (!text || !title || !targetLanguage || !cefrLevel) {
-        return NextResponse.json(
-          { error: "Missing required fields: text, title, targetLanguage, cefrLevel" },
-          { status: 400 }
-        );
+        return badRequest("Missing required fields: text, title, targetLanguage, cefrLevel");
+      }
+      if (text.trim().length < 50) {
+        return badRequest("Text must be at least 50 characters");
       }
     } else {
-      return NextResponse.json(
-        { error: "Invalid type. Use 'url' or 'text'" },
-        { status: 400 }
-      );
+      return badRequest("Invalid type. Use 'url' or 'text'");
     }
 
     // Get or create user
@@ -894,14 +796,12 @@ export async function POST(request: Request) {
       user = newUser;
     }
 
-    // Handle text input differently - no deduplication needed, always create new
+    // Handle text input
     if (type === "text") {
-      // Create new article directly with content
       const paragraphs = smartChunkContent(text);
-
-      // Detect source language
       const sourceLanguage = await detectLanguage(text.slice(0, 500));
 
+      // Create article immediately with "queued" status, then update to "translating"
       const [newArticle] = await db
         .insert(articles)
         .values({
@@ -913,7 +813,7 @@ export async function POST(request: Request) {
           sourceLanguage,
           targetLanguage,
           cefrLevel,
-          status: "translating",
+          status: "queued",
           totalParagraphs: paragraphs.length,
           translationProgress: 0,
         })
@@ -921,26 +821,22 @@ export async function POST(request: Request) {
 
       const articleId = newArticle.id;
 
-      // Start translation in background
-      processTextTranslation(
-        articleId,
-        paragraphs,
-        targetLanguage,
-        cefrLevel
-      ).catch((error) => {
+      // Start background processing
+      processTextTranslation(articleId, paragraphs, targetLanguage, cefrLevel).catch((error) => {
         console.error(`[${articleId}] Background processing error:`, error);
       });
 
       return NextResponse.json({
         articleId,
-        status: "translating",
+        status: "queued",
         progress: 0,
         total: paragraphs.length,
+        title,
       });
     }
 
-    // URL handling (existing logic)
-    // Check if article already exists
+    // URL handling
+    // Check for existing article with same URL/language/level
     const existingArticle = await db.query.articles.findFirst({
       where: and(
         eq(articles.userId, user.id),
@@ -952,7 +848,11 @@ export async function POST(request: Request) {
 
     // If completed, return immediately
     if (existingArticle?.status === "completed") {
-      return NextResponse.json({ articleId: existingArticle.id, status: "completed" });
+      return NextResponse.json({
+        articleId: existingArticle.id,
+        status: "completed",
+        isExisting: true,
+      });
     }
 
     let articleId: string;
@@ -978,30 +878,40 @@ export async function POST(request: Request) {
         }
       }
 
-      // Update status to indicate we're resuming
-      const newStatus = paragraphs.length === 0 ? "fetching" : "translating";
+      // Clear error state and update status
+      const newStatus = paragraphs.length === 0 ? "queued" : "translating";
       await db
         .update(articles)
-        .set({ status: newStatus, errorMessage: null })
+        .set({
+          status: newStatus,
+          errorMessage: null,
+          errorCode: null,
+          updatedAt: new Date(),
+        })
         .where(eq(articles.id, articleId));
+
+      console.log(`[${articleId}] Resuming article (${existingBlocks.length}/${paragraphs.length} done)`);
     } else {
-      // Create new article record
+      // Create new article immediately with "queued" status
+      // This ensures the article appears in the user's list right away
       const [newArticle] = await db
         .insert(articles)
         .values({
           userId: user.id,
           sourceType: "url",
           sourceUrl: url,
+          title: url, // Placeholder title until we fetch
           targetLanguage,
           cefrLevel,
-          status: "fetching",
+          status: "queued",
         })
         .returning({ id: articles.id });
+
       articleId = newArticle.id;
+      console.log(`[${articleId}] Created new article for ${url}`);
     }
 
-    // Start background processing (fire and forget)
-    // The promise continues even after we return the response
+    // Start background processing
     processTranslation(
       articleId,
       url,
@@ -1013,20 +923,14 @@ export async function POST(request: Request) {
       console.error(`[${articleId}] Background processing error:`, error);
     });
 
-    // Return immediately so the client can start polling
+    // Return immediately
     return NextResponse.json({
       articleId,
-      status: paragraphs.length === 0 ? "fetching" : "translating",
+      status: "queued",
       progress: existingBlocks.length,
       total: paragraphs.length,
     });
-
   } catch (error) {
-    console.error("Translation error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json(
-      { error: `Translation failed: ${errorMessage}` },
-      { status: 500 }
-    );
+    return handleApiError(error, "Translation");
   }
 }

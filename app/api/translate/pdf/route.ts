@@ -2,9 +2,24 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { db, users, articles } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { extractTextFromPDF } from "@/lib/pdf/extract-text";
-import { v4 as uuidv4 } from "uuid";
+import { GoogleGenAI } from "@google/genai";
+import { getCefrGuidelines } from "@/lib/cefr-guidelines";
+import {
+  PDFValidationError,
+  PDFExtractionError,
+  PDFUploadError,
+  toAppError,
+  type ArticleStatus,
+} from "@/lib/errors";
+import { handleApiError, unauthorized, badRequest } from "@/lib/api-error-handler";
+import { withTimeout } from "@/lib/utils/async";
+import { generatePdfStorageKey, generatePdfTitle } from "@/lib/utils/safe-name";
+
+// ============================================================================
+// Clients
+// ============================================================================
 
 const s3Client = new S3Client({
   region: "auto",
@@ -15,11 +30,6 @@ const s3Client = new S3Client({
   },
 });
 
-// Import translation functions from main translate route
-// We need to recreate some logic here since we can't easily import from route files
-import { GoogleGenAI } from "@google/genai";
-import { getCefrGuidelines } from "@/lib/cefr-guidelines";
-
 let geminiClient: GoogleGenAI | null = null;
 function getGemini() {
   if (!geminiClient && process.env.GOOGLE_AI_API_KEY) {
@@ -28,12 +38,108 @@ function getGemini() {
   return geminiClient;
 }
 
+// ============================================================================
+// Types
+// ============================================================================
+
 interface TranslationBlock {
   original: string;
   translated: string;
+  bridge?: string;
 }
 
-// Chunking config
+// ============================================================================
+// Status Helpers
+// ============================================================================
+
+async function updateArticleStatus(
+  articleId: string,
+  status: ArticleStatus,
+  extras?: Record<string, unknown>
+) {
+  await db
+    .update(articles)
+    .set({
+      status,
+      updatedAt: new Date(),
+      ...extras,
+    })
+    .where(eq(articles.id, articleId));
+}
+
+async function markArticleFailed(articleId: string, error: unknown) {
+  const appError = toAppError(error);
+  await db
+    .update(articles)
+    .set({
+      status: "failed",
+      errorMessage: appError.userMessage,
+      errorCode: appError.code,
+      retryCount: sql`${articles.retryCount} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(articles.id, articleId));
+}
+
+// ============================================================================
+// PDF Validation
+// ============================================================================
+
+interface PDFValidationResult {
+  isValid: boolean;
+  error?: string;
+  sizeBytes: number;
+}
+
+function validatePdfFile(file: File, buffer: Buffer): PDFValidationResult {
+  const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+
+  // Check size
+  if (buffer.length > MAX_SIZE) {
+    return {
+      isValid: false,
+      error: `PDF is too large (${(buffer.length / 1024 / 1024).toFixed(1)}MB). Maximum size is 10MB.`,
+      sizeBytes: buffer.length,
+    };
+  }
+
+  if (buffer.length < 100) {
+    return {
+      isValid: false,
+      error: "File appears to be empty or corrupted.",
+      sizeBytes: buffer.length,
+    };
+  }
+
+  // Check PDF magic bytes
+  const header = buffer.slice(0, 5).toString("ascii");
+  if (header !== "%PDF-") {
+    return {
+      isValid: false,
+      error: "File is not a valid PDF document.",
+      sizeBytes: buffer.length,
+    };
+  }
+
+  // Check file extension
+  if (!file.name.toLowerCase().endsWith(".pdf")) {
+    return {
+      isValid: false,
+      error: "Only PDF files are supported.",
+      sizeBytes: buffer.length,
+    };
+  }
+
+  return {
+    isValid: true,
+    sizeBytes: buffer.length,
+  };
+}
+
+// ============================================================================
+// Chunking (shared with main translate route)
+// ============================================================================
+
 const CHUNK_CONFIG = {
   MIN_WORDS: 50,
   TARGET_WORDS: 250,
@@ -41,7 +147,10 @@ const CHUNK_CONFIG = {
 };
 
 function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(w => w.length > 0).length;
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0).length;
 }
 
 function splitAtSentences(text: string, maxWords: number): string[] {
@@ -49,12 +158,11 @@ function splitAtSentences(text: string, maxWords: number): string[] {
   const sentences = text.match(sentencePattern) || [text];
 
   const chunks: string[] = [];
-  let current = '';
+  let current = "";
   let currentWords = 0;
 
   for (const sentence of sentences) {
     const sentenceWords = countWords(sentence);
-
     if (currentWords + sentenceWords <= maxWords) {
       current += sentence;
       currentWords += sentenceWords;
@@ -74,24 +182,24 @@ function smartChunkContent(content: string): string[] {
 
   let segments = content
     .split(/\n\n+/)
-    .map(p => p.trim())
-    .filter(p => p.length > 0);
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
 
   if (segments.length <= 1 && countWords(content) > MAX_WORDS) {
     segments = content
       .split(/\n+/)
-      .map(p => p.trim())
-      .filter(p => p.length > 0);
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
   }
 
-  segments = segments.flatMap(segment => {
+  segments = segments.flatMap((segment) => {
     const words = countWords(segment);
     if (words <= MAX_WORDS) return [segment];
     return splitAtSentences(segment, TARGET_WORDS);
   });
 
   const merged: string[] = [];
-  let buffer = '';
+  let buffer = "";
   let bufferWords = 0;
 
   for (const segment of segments) {
@@ -106,10 +214,12 @@ function smartChunkContent(content: string): string[] {
     const shouldMerge =
       bufferWords < MIN_WORDS ||
       segmentWords < MIN_WORDS ||
-      (bufferWords < TARGET_WORDS && segmentWords < TARGET_WORDS && bufferWords + segmentWords <= MAX_WORDS);
+      (bufferWords < TARGET_WORDS &&
+        segmentWords < TARGET_WORDS &&
+        bufferWords + segmentWords <= MAX_WORDS);
 
     if (shouldMerge && bufferWords + segmentWords <= MAX_WORDS) {
-      buffer = buffer + '\n\n' + segment;
+      buffer = buffer + "\n\n" + segment;
       bufferWords += segmentWords;
     } else {
       if (buffer.trim()) merged.push(buffer.trim());
@@ -127,14 +237,18 @@ function smartChunkContent(content: string): string[] {
       const secondLast = merged[merged.length - 2];
       const secondLastWords = countWords(secondLast);
       if (secondLastWords + lastWords <= MAX_WORDS) {
-        merged[merged.length - 2] = secondLast + '\n\n' + lastChunk;
+        merged[merged.length - 2] = secondLast + "\n\n" + lastChunk;
         merged.pop();
       }
     }
   }
 
-  return merged.filter(chunk => chunk.trim().length > 0);
+  return merged.filter((chunk) => chunk.trim().length > 0);
 }
+
+// ============================================================================
+// Language Detection & Translation
+// ============================================================================
 
 async function detectLanguage(text: string): Promise<string> {
   const gemini = getGemini();
@@ -144,15 +258,19 @@ async function detectLanguage(text: string): Promise<string> {
   const prompt = `Detect the language of the following text. Return ONLY the language name in English. No explanation.\n\nText:\n${sample}`;
 
   try {
-    const response = await gemini.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: { thinkingConfig: { thinkingBudget: 0 } },
-    });
+    const response = await withTimeout(
+      gemini.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { thinkingConfig: { thinkingBudget: 0 } },
+      }),
+      30000,
+      "Language detection"
+    );
 
     const detected = response.text?.trim();
     if (detected) {
-      const normalized = detected.replace(/[^a-zA-Z]/g, '');
+      const normalized = detected.replace(/[^a-zA-Z]/g, "");
       return normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
     }
   } catch (error) {
@@ -180,25 +298,34 @@ ${levelGuidelines}
 
 Return JSON format:
 {
-  "original": "brief description of source content",
-  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level"
+  "original": "the source text (preserve exactly)",
+  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level",
+  "bridge": "English translation that maps 1-1 to your translated text"
 }
 
 INPUT:
 ${text}`;
 
   try {
-    const response = await gemini.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: { responseMimeType: "application/json" },
-    });
+    const response = await withTimeout(
+      gemini.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      }),
+      60000,
+      "Translation"
+    );
 
     const content = response.text;
     if (content) {
       const parsed = JSON.parse(content);
       if (parsed.translated) {
-        return { original: text, translated: parsed.translated };
+        return {
+          original: text,
+          translated: parsed.translated,
+          bridge: parsed.bridge || undefined,
+        };
       }
     }
   } catch (error) {
@@ -208,24 +335,85 @@ ${text}`;
   return { original: text, translated: text };
 }
 
-// Background processing for PDF translation
-async function processPdfTranslation(
+// ============================================================================
+// Background Processing
+// ============================================================================
+
+async function processPdfInBackground(
   articleId: string,
-  paragraphs: string[],
+  pdfBuffer: Buffer,
+  pdfKey: string,
   targetLanguage: string,
-  cefrLevel: string
+  cefrLevel: string,
+  displayTitle: string
 ) {
-  const translatedBlocks: TranslationBlock[] = [];
-
   try {
-    const MAX_PARALLEL = 15;
+    // Phase 1: Upload PDF to R2
+    await updateArticleStatus(articleId, "fetching");
+    console.log(`[${articleId}] Uploading PDF to R2: ${pdfKey}`);
 
-    console.log(`[${articleId}] Starting PDF translation: ${paragraphs.length} chunks`);
+    try {
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: process.env.R2_BUCKET_NAME,
+          Key: pdfKey,
+          Body: pdfBuffer,
+          ContentType: "application/pdf",
+        })
+      );
+    } catch (error) {
+      throw new PDFUploadError(error instanceof Error ? error.message : "Upload failed");
+    }
+
+    // Phase 2: Extract text from PDF
+    await updateArticleStatus(articleId, "extracting");
+    console.log(`[${articleId}] Extracting text from PDF...`);
+
+    let extracted;
+    try {
+      extracted = await extractTextFromPDF(pdfBuffer, displayTitle);
+    } catch (error) {
+      throw new PDFExtractionError(error instanceof Error ? error.message : "Extraction failed");
+    }
+
+    if (!extracted.content || extracted.content.length < 50) {
+      throw new PDFExtractionError(
+        "Could not extract enough text from this PDF. It may be scanned or image-only."
+      );
+    }
+
+    const title = extracted.title || displayTitle;
+
+    // Phase 3: Detect language
+    await updateArticleStatus(articleId, "detecting", { title });
+    console.log(`[${articleId}] Detecting source language...`);
+
+    const sourceLanguage = await detectLanguage(extracted.content.slice(0, 500));
+    console.log(`[${articleId}] Detected: ${sourceLanguage}`);
+
+    // Phase 4: Chunk content
+    const paragraphs = smartChunkContent(extracted.content);
+    console.log(`[${articleId}] ${paragraphs.length} chunks to translate`);
+
+    // Update with extracted content
+    await updateArticleStatus(articleId, "translating", {
+      title,
+      originalContent: JSON.stringify(paragraphs),
+      sourceLanguage,
+      totalParagraphs: paragraphs.length,
+      translationProgress: 0,
+    });
+
+    // Phase 5: Translate in parallel waves
+    const translatedBlocks: TranslationBlock[] = [];
+    const MAX_PARALLEL = 15;
 
     for (let i = 0; i < paragraphs.length; i += MAX_PARALLEL) {
       const wave = paragraphs.slice(i, i + MAX_PARALLEL);
 
-      console.log(`[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, paragraphs.length)} of ${paragraphs.length}`);
+      console.log(
+        `[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, paragraphs.length)}`
+      );
 
       const results = await Promise.allSettled(
         wave.map((chunk) => translateChunk(chunk, targetLanguage, cefrLevel))
@@ -248,54 +436,46 @@ async function processPdfTranslation(
         }
       }
 
+      // Save progress after each wave
       await db
         .update(articles)
         .set({
           translatedContent: JSON.stringify(translatedBlocks),
           translationProgress: translatedBlocks.length,
+          updatedAt: new Date(),
         })
         .where(eq(articles.id, articleId));
 
       console.log(`[${articleId}] Progress: ${translatedBlocks.length}/${paragraphs.length}`);
     }
 
+    // Calculate word count and mark complete
     const wordCount = translatedBlocks.reduce((acc, block) => {
       return acc + (block.translated?.split(/\s+/).length || 0);
     }, 0);
 
-    await db
-      .update(articles)
-      .set({
-        translatedContent: JSON.stringify(translatedBlocks),
-        status: "completed",
-        wordCount,
-        translationProgress: paragraphs.length,
-      })
-      .where(eq(articles.id, articleId));
+    await updateArticleStatus(articleId, "completed", {
+      translatedContent: JSON.stringify(translatedBlocks),
+      wordCount,
+      translationProgress: paragraphs.length,
+    });
 
     console.log(`[${articleId}] PDF translation completed! ${wordCount} words`);
-
   } catch (error) {
-    console.error(`[${articleId}] PDF translation error:`, error);
-
-    await db
-      .update(articles)
-      .set({
-        translatedContent: translatedBlocks.length > 0 ? JSON.stringify(translatedBlocks) : null,
-        translationProgress: translatedBlocks.length,
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : "Translation failed",
-      })
-      .where(eq(articles.id, articleId));
+    console.error(`[${articleId}] PDF processing error:`, error);
+    await markArticleFailed(articleId, error);
   }
 }
 
-// POST - Upload and translate PDF
+// ============================================================================
+// API Handler
+// ============================================================================
+
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return unauthorized();
     }
 
     // Parse multipart form data
@@ -305,31 +485,33 @@ export async function POST(request: Request) {
     const cefrLevel = formData.get("cefrLevel") as string;
     const customTitle = formData.get("title") as string | null;
 
-    if (!file || !targetLanguage || !cefrLevel) {
+    // Validate required fields
+    if (!file) {
+      return badRequest("No file provided");
+    }
+
+    if (!targetLanguage || !cefrLevel) {
+      return badRequest("Missing required fields: targetLanguage, cefrLevel");
+    }
+
+    // Convert file to buffer for validation
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfBuffer = Buffer.from(arrayBuffer);
+
+    // Validate PDF
+    const validation = validatePdfFile(file, pdfBuffer);
+    if (!validation.isValid) {
       return NextResponse.json(
-        { error: "Missing required fields: file, targetLanguage, cefrLevel" },
+        {
+          error: validation.error,
+          code: "PDF_INVALID",
+          isRetryable: false,
+        },
         { status: 400 }
       );
     }
 
-    // Validate file type
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      return NextResponse.json(
-        { error: "Only PDF files are supported" },
-        { status: 400 }
-      );
-    }
-
-    // Size limit: 10MB
-    const MAX_SIZE = 10 * 1024 * 1024;
-    if (file.size > MAX_SIZE) {
-      return NextResponse.json(
-        { error: "File too large. Maximum size is 10MB" },
-        { status: 400 }
-      );
-    }
-
-    console.log(`[PDF] Received file: ${file.name} (${file.size} bytes)`);
+    console.log(`[PDF] Received file: ${file.name} (${validation.sizeBytes} bytes)`);
 
     // Get or create user
     let user = await db.query.users.findFirst({
@@ -345,46 +527,12 @@ export async function POST(request: Request) {
       user = newUser;
     }
 
-    // Generate unique ID for this PDF
-    const pdfId = uuidv4();
-    const pdfKey = `pdfs/${pdfId}.pdf`;
+    // Generate safe storage key and display title
+    const pdfKey = generatePdfStorageKey(file.name);
+    const displayTitle = customTitle?.trim() || generatePdfTitle(file.name);
 
-    // Convert file to buffer
-    const arrayBuffer = await file.arrayBuffer();
-    const pdfBuffer = Buffer.from(arrayBuffer);
-
-    // Upload PDF to R2
-    console.log(`[PDF] Uploading to R2: ${pdfKey}`);
-    await s3Client.send(
-      new PutObjectCommand({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Key: pdfKey,
-        Body: pdfBuffer,
-        ContentType: "application/pdf",
-      })
-    );
-
-    // Extract text from PDF using Gemini
-    console.log(`[PDF] Extracting text...`);
-    const extracted = await extractTextFromPDF(pdfBuffer, file.name);
-
-    if (!extracted.content || extracted.content.length < 50) {
-      return NextResponse.json(
-        { error: "Could not extract text from PDF. The file may be image-only or corrupted." },
-        { status: 400 }
-      );
-    }
-
-    // Use custom title if provided, otherwise use extracted title
-    const title = customTitle?.trim() || extracted.title;
-
-    // Chunk the content
-    const paragraphs = smartChunkContent(extracted.content);
-
-    // Detect source language
-    const sourceLanguage = await detectLanguage(extracted.content.slice(0, 500));
-
-    // Create article record
+    // Create article record immediately with "queued" status
+    // This ensures the article appears in the user's list right away
     const [newArticle] = await db
       .insert(articles)
       .values({
@@ -392,45 +540,39 @@ export async function POST(request: Request) {
         sourceType: "pdf",
         sourceUrl: null,
         pdfUrl: pdfKey,
-        title,
-        originalContent: JSON.stringify(paragraphs),
-        sourceLanguage,
+        title: displayTitle,
         targetLanguage,
         cefrLevel,
-        status: "translating",
-        totalParagraphs: paragraphs.length,
+        status: "queued",
+        totalParagraphs: 0,
         translationProgress: 0,
       })
       .returning({ id: articles.id });
 
     const articleId = newArticle.id;
+    console.log(`[${articleId}] Created PDF article, starting background processing...`);
 
-    console.log(`[PDF] Created article ${articleId}, starting translation...`);
-
-    // Start translation in background
-    processPdfTranslation(
+    // Start background processing
+    processPdfInBackground(
       articleId,
-      paragraphs,
+      pdfBuffer,
+      pdfKey,
       targetLanguage,
-      cefrLevel
+      cefrLevel,
+      displayTitle
     ).catch((error) => {
       console.error(`[${articleId}] Background PDF processing error:`, error);
     });
 
+    // Return immediately
     return NextResponse.json({
       articleId,
-      status: "translating",
+      status: "queued",
       progress: 0,
-      total: paragraphs.length,
-      title,
+      total: 0,
+      title: displayTitle,
     });
-
   } catch (error) {
-    console.error("PDF translation error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json(
-      { error: `PDF processing failed: ${errorMessage}` },
-      { status: 500 }
-    );
+    return handleApiError(error, "PDF upload");
   }
 }

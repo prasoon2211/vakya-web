@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Globe, Headphones, Loader2, Sparkles, BookOpen, ExternalLink, RefreshCw, AlertCircle, Trash2, MoreVertical, FileText, Upload, Link2, Type } from "lucide-react";
@@ -27,7 +27,8 @@ import { formatRelativeTime, extractDomain } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 type InputTab = "url" | "text" | "pdf";
-type TranslationStatus = "idle" | "fetching" | "translating" | "completed" | "failed";
+type ArticleStatus = "queued" | "fetching" | "extracting" | "detecting" | "translating" | "completed" | "failed";
+type TranslationStatus = "idle" | ArticleStatus;
 
 interface TranslationState {
   status: TranslationStatus;
@@ -35,8 +36,21 @@ interface TranslationState {
   progress?: number;
   total?: number;
   error?: string;
+  errorCode?: string;
+  isRetryable?: boolean;
   title?: string;
 }
+
+// Status configuration for display
+const STATUS_CONFIG: Record<ArticleStatus, { icon: React.ReactNode; color: string; label: string; bgColor: string }> = {
+  queued: { icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, color: "text-gray-500", label: "Queued", bgColor: "bg-gray-100" },
+  fetching: { icon: <Globe className="w-3.5 h-3.5 animate-pulse" />, color: "text-blue-500", label: "Fetching...", bgColor: "bg-blue-50" },
+  extracting: { icon: <FileText className="w-3.5 h-3.5 animate-pulse" />, color: "text-blue-500", label: "Extracting...", bgColor: "bg-blue-50" },
+  detecting: { icon: <Sparkles className="w-3.5 h-3.5 animate-pulse" />, color: "text-purple-500", label: "Detecting...", bgColor: "bg-purple-50" },
+  translating: { icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, color: "text-yellow-600", label: "Translating...", bgColor: "bg-yellow-50" },
+  completed: { icon: <BookOpen className="w-3.5 h-3.5" />, color: "text-green-600", label: "Ready", bgColor: "bg-green-50" },
+  failed: { icon: <AlertCircle className="w-3.5 h-3.5" />, color: "text-red-500", label: "Failed", bgColor: "bg-red-50" },
+};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -58,13 +72,13 @@ export default function DashboardPage() {
   const [translationState, setTranslationState] = useState<TranslationState>({ status: "idle" });
   const [articles, setArticles] = useState<Article[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const articlesPollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
+      if (articlesPollingRef.current) {
+        clearInterval(articlesPollingRef.current);
       }
     };
   }, []);
@@ -73,6 +87,65 @@ export default function DashboardPage() {
     fetchArticles();
     fetchUserSettings();
   }, []);
+
+  // Poll for status updates on all processing articles
+  useEffect(() => {
+    const processingArticles = articles.filter(
+      (a) => !["completed", "failed"].includes(a.status)
+    );
+
+    if (processingArticles.length === 0) {
+      if (articlesPollingRef.current) {
+        clearInterval(articlesPollingRef.current);
+        articlesPollingRef.current = null;
+      }
+      return;
+    }
+
+    // Start polling if we have processing articles
+    const pollProcessingArticles = async () => {
+      const updates = await Promise.all(
+        processingArticles.map(async (article) => {
+          try {
+            const res = await fetch(`/api/articles/${article.id}/status`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            return { id: article.id, ...data };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      // Update articles with new status
+      setArticles((prev) =>
+        prev.map((article) => {
+          const update = updates.find((u) => u?.id === article.id);
+          if (!update) return article;
+          return {
+            ...article,
+            status: update.status,
+            title: update.title || article.title,
+            translationProgress: update.progress?.current ?? article.translationProgress,
+            totalParagraphs: update.progress?.total ?? article.totalParagraphs,
+            errorMessage: update.error?.message,
+            errorCode: update.error?.code,
+          };
+        })
+      );
+    };
+
+    // Poll immediately, then every 1.5 seconds
+    pollProcessingArticles();
+    articlesPollingRef.current = setInterval(pollProcessingArticles, 1500);
+
+    return () => {
+      if (articlesPollingRef.current) {
+        clearInterval(articlesPollingRef.current);
+        articlesPollingRef.current = null;
+      }
+    };
+  }, [articles.map(a => `${a.id}-${a.status}`).join(",")]);
 
   const fetchUserSettings = async () => {
     try {
@@ -101,53 +174,6 @@ export default function DashboardPage() {
     }
   };
 
-  const pollStatus = useCallback(async (articleId: string) => {
-    try {
-      const res = await fetch(`/api/articles/${articleId}/status`);
-      if (!res.ok) return;
-
-      const data = await res.json();
-
-      if (data.status === "completed") {
-        // Stop polling
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
-        }
-
-        setTranslationState({ status: "completed", articleId, title: data.title });
-        toast({
-          title: "Article translated!",
-          description: data.title || "Redirecting to your article...",
-          variant: "success",
-        });
-
-        router.push(`/article/${articleId}`);
-      } else if (data.status === "failed") {
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
-        }
-
-        setTranslationState({
-          status: "failed",
-          articleId,
-          error: data.errorMessage || "Translation failed",
-          title: data.title,
-        });
-      } else {
-        setTranslationState({
-          status: data.status,
-          articleId,
-          progress: data.translationProgress,
-          total: data.totalParagraphs,
-          title: data.title,
-        });
-      }
-    } catch (error) {
-      console.error("Polling error:", error);
-    }
-  }, [router]);
 
   const handleTranslate = async () => {
     // Validate based on active tab
@@ -178,8 +204,8 @@ export default function DashboardPage() {
       }
     }
 
-    // Show immediate feedback
-    setTranslationState({ status: "fetching" });
+    // Show brief loading state while submitting
+    setTranslationState({ status: "queued" });
 
     try {
       let res: Response;
@@ -244,20 +270,33 @@ export default function DashboardPage() {
         return;
       }
 
-      // Translation started - update state and start polling immediately
-      setTranslationState({
-        status: data.status || "translating",
-        articleId: data.articleId,
-        progress: data.progress || 0,
-        total: data.total || 0,
-        title: data.title,
+      // Article queued successfully - clear form and reset state
+      // The article card will show the status via polling
+      toast({
+        title: "Article queued!",
+        description: "Processing will continue in the background.",
+        variant: "success",
       });
 
-      // Start polling for status immediately
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
+      // Clear form based on active tab
+      if (activeTab === "url") {
+        setUrl("");
+      } else if (activeTab === "text") {
+        setTextTitle("");
+        setTextContent("");
+      } else if (activeTab === "pdf") {
+        setPdfFile(null);
+        setPdfTitle("");
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
       }
-      pollingRef.current = setInterval(() => pollStatus(data.articleId), 1000);
+
+      // Reset to idle - status is now shown in article card
+      setTranslationState({ status: "idle" });
+
+      // Refresh article list to show the new article immediately
+      fetchArticles();
 
     } catch (error) {
       setTranslationState({
@@ -310,10 +349,6 @@ export default function DashboardPage() {
   };
 
   const handleCancel = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
     setTranslationState({ status: "idle" });
   };
 
@@ -349,35 +384,20 @@ export default function DashboardPage() {
 
   const getStatusMessage = () => {
     switch (translationState.status) {
-      case "fetching":
-        if (activeTab === "pdf") return "Processing PDF...";
-        if (activeTab === "text") return "Preparing text...";
-        return "Fetching article content...";
-      case "translating":
-        if (translationState.total && translationState.total > 0) {
-          const progress = translationState.progress || 0;
-          const percent = Math.round((progress / translationState.total) * 100);
-          return `Translating... ${percent}% (${progress}/${translationState.total} chunks)`;
-        }
-        return "Preparing translation...";
+      case "queued":
+        if (activeTab === "pdf") return "Uploading PDF...";
+        if (activeTab === "text") return "Submitting...";
+        return "Submitting...";
       case "failed":
-        return translationState.error || "Translation failed";
+        return translationState.error || "Submission failed";
       default:
         return "";
     }
   };
 
   const getStatusSubMessage = () => {
-    if (translationState.title) {
-      return translationState.title;
-    }
-    if (translationState.status === "fetching") {
-      if (activeTab === "pdf") return "Extracting text from PDF...";
-      if (activeTab === "text") return "Processing your text...";
-      return "Extracting main content from the page...";
-    }
-    if (translationState.status === "translating") {
-      return "This usually takes just a few seconds";
+    if (translationState.status === "queued") {
+      return "Your article will appear below shortly";
     }
     return null;
   };
@@ -390,7 +410,7 @@ export default function DashboardPage() {
     return false;
   };
 
-  const isTranslating = translationState.status === "fetching" || translationState.status === "translating";
+  const isSubmitting = translationState.status === "queued";
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
@@ -424,13 +444,13 @@ export default function DashboardPage() {
               <div className="flex gap-1 p-1 bg-[#f3ede4] rounded-xl">
                 <button
                   onClick={() => setActiveTab("url")}
-                  disabled={isTranslating}
+                  disabled={isSubmitting}
                   className={cn(
                     "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
                     activeTab === "url"
                       ? "bg-white text-[#1a1a1a] shadow-sm"
                       : "text-[#6b6b6b] hover:text-[#3d3d3d]",
-                    isTranslating && "opacity-50 cursor-not-allowed"
+                    isSubmitting && "opacity-50 cursor-not-allowed"
                   )}
                 >
                   <Link2 className="w-4 h-4" />
@@ -438,13 +458,13 @@ export default function DashboardPage() {
                 </button>
                 <button
                   onClick={() => setActiveTab("text")}
-                  disabled={isTranslating}
+                  disabled={isSubmitting}
                   className={cn(
                     "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
                     activeTab === "text"
                       ? "bg-white text-[#1a1a1a] shadow-sm"
                       : "text-[#6b6b6b] hover:text-[#3d3d3d]",
-                    isTranslating && "opacity-50 cursor-not-allowed"
+                    isSubmitting && "opacity-50 cursor-not-allowed"
                   )}
                 >
                   <Type className="w-4 h-4" />
@@ -452,13 +472,13 @@ export default function DashboardPage() {
                 </button>
                 <button
                   onClick={() => setActiveTab("pdf")}
-                  disabled={isTranslating}
+                  disabled={isSubmitting}
                   className={cn(
                     "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
                     activeTab === "pdf"
                       ? "bg-white text-[#1a1a1a] shadow-sm"
                       : "text-[#6b6b6b] hover:text-[#3d3d3d]",
-                    isTranslating && "opacity-50 cursor-not-allowed"
+                    isSubmitting && "opacity-50 cursor-not-allowed"
                   )}
                 >
                   <FileText className="w-4 h-4" />
@@ -475,7 +495,7 @@ export default function DashboardPage() {
                   placeholder="Paste an article URL..."
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  disabled={isTranslating}
+                  disabled={isSubmitting}
                   className="h-14 text-base"
                 />
               )}
@@ -487,14 +507,14 @@ export default function DashboardPage() {
                     placeholder="Title for your text..."
                     value={textTitle}
                     onChange={(e) => setTextTitle(e.target.value)}
-                    disabled={isTranslating}
+                    disabled={isSubmitting}
                     className="h-12"
                   />
                   <textarea
                     placeholder="Paste or type your text here (at least 50 characters)..."
                     value={textContent}
                     onChange={(e) => setTextContent(e.target.value)}
-                    disabled={isTranslating}
+                    disabled={isSubmitting}
                     className="w-full h-40 px-4 py-3 text-base rounded-xl border border-[#e8dfd3] bg-white placeholder:text-[#9a9a9a] focus:outline-none focus:ring-2 focus:ring-[#c45c3e]/20 focus:border-[#c45c3e] disabled:opacity-50 resize-none"
                   />
                   <p className="text-xs text-[#9a9a9a]">
@@ -518,14 +538,14 @@ export default function DashboardPage() {
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
-                      onClick={() => !isTranslating && fileInputRef.current?.click()}
+                      onClick={() => !isSubmitting && fileInputRef.current?.click()}
                       className={cn(
                         "relative h-40 rounded-xl border-2 border-dashed transition-all cursor-pointer",
                         "flex flex-col items-center justify-center gap-3",
                         isDragging
                           ? "border-[#c45c3e] bg-[#c45c3e]/5"
                           : "border-[#e8dfd3] hover:border-[#c45c3e]/50 hover:bg-[#faf8f5]",
-                        isTranslating && "opacity-50 cursor-not-allowed"
+                        isSubmitting && "opacity-50 cursor-not-allowed"
                       )}
                     >
                       <div className="w-12 h-12 rounded-full bg-[#f3ede4] flex items-center justify-center">
@@ -552,7 +572,7 @@ export default function DashboardPage() {
                         </p>
                         <button
                           onClick={(e) => { e.stopPropagation(); clearPdfFile(); }}
-                          disabled={isTranslating}
+                          disabled={isSubmitting}
                           className="text-xs text-[#c45c3e] hover:underline disabled:opacity-50"
                         >
                           Remove file
@@ -564,7 +584,7 @@ export default function DashboardPage() {
                     placeholder="Custom title (optional)"
                     value={pdfTitle}
                     onChange={(e) => setPdfTitle(e.target.value)}
-                    disabled={isTranslating}
+                    disabled={isSubmitting}
                     className="h-12"
                   />
                 </div>
@@ -576,7 +596,7 @@ export default function DashboardPage() {
                   <label className="block text-sm font-medium text-[#3d3d3d] mb-2">
                     Target Language
                   </label>
-                  <Select value={targetLanguage} onValueChange={setTargetLanguage} disabled={isTranslating}>
+                  <Select value={targetLanguage} onValueChange={setTargetLanguage} disabled={isSubmitting}>
                     <SelectTrigger className="h-12">
                       <SelectValue placeholder="Select language" />
                     </SelectTrigger>
@@ -594,7 +614,7 @@ export default function DashboardPage() {
                   <label className="block text-sm font-medium text-[#3d3d3d] mb-2">
                     Proficiency Level
                   </label>
-                  <Select value={cefrLevel} onValueChange={setCefrLevel} disabled={isTranslating}>
+                  <Select value={cefrLevel} onValueChange={setCefrLevel} disabled={isSubmitting}>
                     <SelectTrigger className="h-12">
                       <SelectValue placeholder="Select level" />
                     </SelectTrigger>
@@ -633,33 +653,11 @@ export default function DashboardPage() {
                     </Button>
                   </div>
                 </div>
-              ) : isTranslating ? (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <Loader2 className="w-5 h-5 animate-spin text-[#c45c3e]" />
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium text-[#1a1a1a]">{getStatusMessage()}</span>
-                      {getStatusSubMessage() && (
-                        <p className="text-xs text-[#6b6b6b] truncate mt-0.5">{getStatusSubMessage()}</p>
-                      )}
-                    </div>
-                  </div>
-                  {translationState.status === "translating" && translationState.total && translationState.total > 0 ? (
-                    <div className="w-full h-2 bg-[#e8dfd3] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#c45c3e] rounded-full transition-all duration-500 ease-out"
-                        style={{ width: `${Math.round(((translationState.progress || 0) / translationState.total) * 100)}%` }}
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-full h-2 bg-[#e8dfd3] rounded-full overflow-hidden">
-                      <div className="h-full bg-[#c45c3e]/50 rounded-full animate-pulse w-1/3" />
-                    </div>
-                  )}
-                  <p className="text-xs text-[#9a9a9a]">
-                    You can safely refresh - progress is saved automatically.
-                  </p>
-                </div>
+              ) : isSubmitting ? (
+                <Button disabled className="w-full h-14 text-base">
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {getStatusMessage()}
+                </Button>
               ) : (
                 <Button
                   onClick={handleTranslate}
@@ -683,13 +681,13 @@ export default function DashboardPage() {
             <div className="flex gap-1 p-1 bg-[#f3ede4] rounded-xl">
               <button
                 onClick={() => setActiveTab("url")}
-                disabled={isTranslating}
+                disabled={isSubmitting}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",
                   activeTab === "url"
                     ? "bg-white text-[#1a1a1a] shadow-sm"
                     : "text-[#6b6b6b]",
-                  isTranslating && "opacity-50"
+                  isSubmitting && "opacity-50"
                 )}
               >
                 <Link2 className="w-3.5 h-3.5" />
@@ -697,13 +695,13 @@ export default function DashboardPage() {
               </button>
               <button
                 onClick={() => setActiveTab("text")}
-                disabled={isTranslating}
+                disabled={isSubmitting}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",
                   activeTab === "text"
                     ? "bg-white text-[#1a1a1a] shadow-sm"
                     : "text-[#6b6b6b]",
-                  isTranslating && "opacity-50"
+                  isSubmitting && "opacity-50"
                 )}
               >
                 <Type className="w-3.5 h-3.5" />
@@ -711,13 +709,13 @@ export default function DashboardPage() {
               </button>
               <button
                 onClick={() => setActiveTab("pdf")}
-                disabled={isTranslating}
+                disabled={isSubmitting}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-all",
                   activeTab === "pdf"
                     ? "bg-white text-[#1a1a1a] shadow-sm"
                     : "text-[#6b6b6b]",
-                  isTranslating && "opacity-50"
+                  isSubmitting && "opacity-50"
                 )}
               >
                 <FileText className="w-3.5 h-3.5" />
@@ -731,7 +729,7 @@ export default function DashboardPage() {
                 placeholder="Paste a URL..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                disabled={isTranslating}
+                disabled={isSubmitting}
                 className="h-12 text-base border-[#e8dfd3]"
               />
             )}
@@ -742,14 +740,14 @@ export default function DashboardPage() {
                   placeholder="Title..."
                   value={textTitle}
                   onChange={(e) => setTextTitle(e.target.value)}
-                  disabled={isTranslating}
+                  disabled={isSubmitting}
                   className="h-11 border-[#e8dfd3]"
                 />
                 <textarea
                   placeholder="Paste or type text here..."
                   value={textContent}
                   onChange={(e) => setTextContent(e.target.value)}
-                  disabled={isTranslating}
+                  disabled={isSubmitting}
                   className="w-full h-32 px-3 py-2.5 text-sm rounded-xl border border-[#e8dfd3] bg-white placeholder:text-[#9a9a9a] focus:outline-none focus:ring-2 focus:ring-[#c45c3e]/20 focus:border-[#c45c3e] disabled:opacity-50 resize-none"
                 />
               </div>
@@ -766,13 +764,13 @@ export default function DashboardPage() {
                 />
                 {!pdfFile ? (
                   <button
-                    onClick={() => !isTranslating && fileInputRef.current?.click()}
-                    disabled={isTranslating}
+                    onClick={() => !isSubmitting && fileInputRef.current?.click()}
+                    disabled={isSubmitting}
                     className={cn(
                       "w-full h-28 rounded-xl border-2 border-dashed border-[#e8dfd3]",
                       "flex flex-col items-center justify-center gap-2",
                       "text-[#6b6b6b] active:bg-[#faf8f5]",
-                      isTranslating && "opacity-50"
+                      isSubmitting && "opacity-50"
                     )}
                   >
                     <Upload className="w-5 h-5" />
@@ -785,7 +783,7 @@ export default function DashboardPage() {
                       <p className="text-sm font-medium text-[#1a1a1a] truncate max-w-[200px]">{pdfFile.name}</p>
                       <button
                         onClick={clearPdfFile}
-                        disabled={isTranslating}
+                        disabled={isSubmitting}
                         className="text-xs text-[#c45c3e] mt-1"
                       >
                         Remove
@@ -797,7 +795,7 @@ export default function DashboardPage() {
             )}
 
             <div className="flex gap-3">
-              <Select value={targetLanguage} onValueChange={setTargetLanguage} disabled={isTranslating}>
+              <Select value={targetLanguage} onValueChange={setTargetLanguage} disabled={isSubmitting}>
                 <SelectTrigger className="h-11 flex-1">
                   <SelectValue placeholder="Language" />
                 </SelectTrigger>
@@ -810,7 +808,7 @@ export default function DashboardPage() {
                 </SelectContent>
               </Select>
 
-              <Select value={cefrLevel} onValueChange={setCefrLevel} disabled={isTranslating}>
+              <Select value={cefrLevel} onValueChange={setCefrLevel} disabled={isSubmitting}>
                 <SelectTrigger className="h-11 w-24">
                   <SelectValue placeholder="Level" />
                 </SelectTrigger>
@@ -847,30 +845,11 @@ export default function DashboardPage() {
                   </Button>
                 </div>
               </div>
-            ) : isTranslating ? (
-              <div className="space-y-3 p-4 bg-[#faf8f5] rounded-xl">
-                <div className="flex items-center gap-3">
-                  <Loader2 className="w-5 h-5 animate-spin text-[#c45c3e]" />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-[#1a1a1a]">{getStatusMessage()}</span>
-                    {getStatusSubMessage() && (
-                      <p className="text-xs text-[#6b6b6b] truncate mt-0.5">{getStatusSubMessage()}</p>
-                    )}
-                  </div>
-                </div>
-                {translationState.status === "translating" && translationState.total && translationState.total > 0 ? (
-                  <div className="w-full h-2 bg-[#e8dfd3] rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-[#c45c3e] rounded-full transition-all duration-500 ease-out"
-                      style={{ width: `${Math.round(((translationState.progress || 0) / translationState.total) * 100)}%` }}
-                    />
-                  </div>
-                ) : (
-                  <div className="w-full h-2 bg-[#e8dfd3] rounded-full overflow-hidden">
-                    <div className="h-full bg-[#c45c3e]/50 rounded-full animate-pulse w-1/3" />
-                  </div>
-                )}
-              </div>
+            ) : isSubmitting ? (
+              <Button disabled className="w-full h-12">
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                {getStatusMessage()}
+              </Button>
             ) : (
               <Button
                 onClick={handleTranslate}
@@ -947,79 +926,156 @@ export default function DashboardPage() {
           </>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {articles.map((article, index) => (
-              <div
-                key={article.id}
-                className="opacity-0 animate-fade-up relative"
-                style={{ animationDelay: `${0.1 * (index + 3)}s`, animationFillMode: 'forwards' }}
-              >
-                <Link href={`/article/${article.id}`}>
-                  <Card className="p-5 h-full cursor-pointer group">
-                    <div className="flex items-start gap-4 mb-3 pr-8">
-                      <h3 className="font-medium text-[#1a1a1a] group-hover:text-[#c45c3e] transition-colors line-clamp-2 flex-1">
-                        {article.title || "Untitled Article"}
-                      </h3>
-                    </div>
+            {articles.map((article, index) => {
+              const status = article.status as ArticleStatus;
+              const statusConfig = STATUS_CONFIG[status] || STATUS_CONFIG.queued;
+              const isProcessing = !["completed", "failed"].includes(status);
+              const isCompleted = status === "completed";
+              const isFailed = status === "failed";
 
-                    <div className="flex items-center gap-2 text-sm text-[#9a9a9a] mb-4">
-                      {article.sourceUrl ? (
-                        <>
-                          <ExternalLink className="w-3 h-3" />
-                          <span className="truncate">{extractDomain(article.sourceUrl)}</span>
-                        </>
-                      ) : article.pdfUrl ? (
-                        <>
-                          <FileText className="w-3 h-3" />
-                          <span>PDF</span>
-                        </>
-                      ) : (
-                        <>
-                          <Type className="w-3 h-3" />
-                          <span>Text</span>
-                        </>
-                      )}
-                      <span className="flex-shrink-0">·</span>
-                      <span className="flex-shrink-0">{article.wordCount || 0} words</span>
-                      {article.audioUrl && (
-                        <>
-                          <span className="flex-shrink-0">·</span>
-                          <Headphones className="w-3.5 h-3.5 flex-shrink-0 text-[#2d5a47]" />
-                        </>
-                      )}
-                    </div>
+              const cardContent = (
+                <Card className={cn(
+                  "p-5 h-full",
+                  isCompleted && "cursor-pointer group",
+                  isFailed && "border-red-200 bg-red-50/30"
+                )}>
+                  <div className="flex items-start gap-4 mb-3 pr-8">
+                    <h3 className={cn(
+                      "font-medium line-clamp-2 flex-1",
+                      isCompleted ? "text-[#1a1a1a] group-hover:text-[#c45c3e] transition-colors" : "text-[#6b6b6b]"
+                    )}>
+                      {article.title || (isProcessing ? "Processing..." : "Untitled Article")}
+                    </h3>
+                  </div>
 
-                    <div className="flex items-center justify-between">
-                      <Badge>
-                        {article.targetLanguage} {article.cefrLevel}
-                      </Badge>
-                      <span className="text-xs text-[#9a9a9a]">
-                        {formatRelativeTime(article.createdAt)}
-                      </span>
+                  {/* Source info */}
+                  <div className="flex items-center gap-2 text-sm text-[#9a9a9a] mb-3">
+                    {article.sourceUrl ? (
+                      <>
+                        <ExternalLink className="w-3 h-3" />
+                        <span className="truncate">{extractDomain(article.sourceUrl)}</span>
+                      </>
+                    ) : article.pdfUrl ? (
+                      <>
+                        <FileText className="w-3 h-3" />
+                        <span>PDF</span>
+                      </>
+                    ) : (
+                      <>
+                        <Type className="w-3 h-3" />
+                        <span>Text</span>
+                      </>
+                    )}
+                    {isCompleted && (
+                      <>
+                        <span className="flex-shrink-0">·</span>
+                        <span className="flex-shrink-0">{article.wordCount || 0} words</span>
+                        {article.audioUrl && (
+                          <>
+                            <span className="flex-shrink-0">·</span>
+                            <Headphones className="w-3.5 h-3.5 flex-shrink-0 text-[#2d5a47]" />
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Status indicator for processing articles */}
+                  {isProcessing && (
+                    <div className="mb-3">
+                      <div className={cn(
+                        "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium",
+                        statusConfig.bgColor,
+                        statusConfig.color
+                      )}>
+                        {statusConfig.icon}
+                        <span>{statusConfig.label}</span>
+                        {status === "translating" && article.totalParagraphs > 0 && (
+                          <span className="ml-1">
+                            ({Math.round((article.translationProgress / article.totalParagraphs) * 100)}%)
+                          </span>
+                        )}
+                      </div>
+                      {status === "translating" && article.totalParagraphs > 0 && (
+                        <div className="mt-2 w-full h-1.5 bg-[#e8dfd3] rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[#c45c3e] rounded-full transition-all duration-500"
+                            style={{ width: `${Math.round((article.translationProgress / article.totalParagraphs) * 100)}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
-                  </Card>
-                </Link>
-                {/* Delete button - absolute positioned */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className="absolute top-3 right-3 p-1.5 rounded-md hover:bg-[#f3ede4] text-[#9a9a9a] hover:text-[#6b6b6b] transition-colors z-10"
-                      onClick={(e) => e.preventDefault()}
-                    >
-                      <MoreVertical className="w-4 h-4" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
-                      onClick={(e) => handleDeleteArticle(article.id, e)}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Delete article
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ))}
+                  )}
+
+                  {/* Error message for failed articles */}
+                  {isFailed && article.errorMessage && (
+                    <div className="mb-3 p-2 rounded-lg bg-red-100 border border-red-200">
+                      <p className="text-xs text-red-700 line-clamp-2">{article.errorMessage}</p>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <Badge>
+                      {article.targetLanguage} {article.cefrLevel}
+                    </Badge>
+                    <span className="text-xs text-[#9a9a9a]">
+                      {formatRelativeTime(article.createdAt)}
+                    </span>
+                  </div>
+                </Card>
+              );
+
+              return (
+                <div
+                  key={article.id}
+                  className="opacity-0 animate-fade-up relative"
+                  style={{ animationDelay: `${0.1 * (index + 3)}s`, animationFillMode: 'forwards' }}
+                >
+                  {isCompleted ? (
+                    <Link href={`/article/${article.id}`}>{cardContent}</Link>
+                  ) : (
+                    cardContent
+                  )}
+                  {/* Delete button - absolute positioned */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="absolute top-3 right-3 p-1.5 rounded-md hover:bg-[#f3ede4] text-[#9a9a9a] hover:text-[#6b6b6b] transition-colors z-10"
+                        onClick={(e) => e.preventDefault()}
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {isFailed && (
+                        <DropdownMenuItem
+                          className="text-[#c45c3e] focus:text-[#c45c3e] focus:bg-[#faf8f5]"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            // Retry the article - re-submit with same parameters
+                            if (article.sourceUrl) {
+                              setUrl(article.sourceUrl);
+                              setActiveTab("url");
+                              handleTranslate();
+                            }
+                          }}
+                        >
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          Retry
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                        onClick={(e) => handleDeleteArticle(article.id, e)}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete article
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>

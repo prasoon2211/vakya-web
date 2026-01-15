@@ -36,15 +36,21 @@ export const articles = pgTable(
     sourceLanguage: text("source_language"), // Detected language of original content
     cefrLevel: text("cefr_level").notNull(),
     // Translation status tracking
-    status: text("status").default("pending").notNull(), // pending, fetching, translating, completed, failed
+    // Status: queued, fetching, extracting, detecting, translating, completed, failed
+    status: text("status").default("queued").notNull(),
     translationProgress: integer("translation_progress").default(0).notNull(), // paragraphs translated
     totalParagraphs: integer("total_paragraphs").default(0).notNull(),
-    errorMessage: text("error_message"),
+    // Error tracking
+    errorMessage: text("error_message"), // User-friendly error message
+    errorCode: text("error_code"), // Machine-readable error code
+    retryCount: integer("retry_count").default(0).notNull(),
+    // Audio
     audioUrl: text("audio_url"),
     audioDurationSeconds: integer("audio_duration_seconds"),
     audioTimestamps: text("audio_timestamps"), // JSON: WordTimestamp[] for reading mode sync
     wordCount: integer("word_count"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_articles_user_id").on(table.userId),
@@ -138,3 +144,15 @@ export type TargetLanguage = typeof LANGUAGES[number];
 // Source types for articles
 export const SOURCE_TYPES = ["url", "text", "pdf"] as const;
 export type SourceType = typeof SOURCE_TYPES[number];
+
+// Article status types
+export const ARTICLE_STATUSES = [
+  "queued",
+  "fetching",
+  "extracting",
+  "detecting",
+  "translating",
+  "completed",
+  "failed",
+] as const;
+export type ArticleStatus = typeof ARTICLE_STATUSES[number];
