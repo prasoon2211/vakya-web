@@ -11,8 +11,28 @@
  *   npx tsx scripts/test-readability.ts https://www.lemonde.fr/...
  */
 
-import { JSDOM } from "jsdom";
+import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
+
+/**
+ * Strip unnecessary HTML elements before parsing to speed up DOM creation
+ */
+function stripUnnecessaryHtml(html: string): string {
+  return html
+    // Remove script tags and contents
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    // Remove style tags and contents
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+    // Remove SVG tags and contents
+    .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, "")
+    // Remove noscript tags
+    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, "")
+    // Remove HTML comments
+    .replace(/<!--[\s\S]*?-->/g, "")
+    // Remove inline event handlers
+    .replace(/\s+on\w+="[^"]*"/gi, "")
+    .replace(/\s+on\w+='[^']*'/gi, "");
+}
 
 const url = process.argv[2];
 
@@ -72,9 +92,26 @@ async function fetchHtml(url: string): Promise<string> {
 }
 
 function extractWithReadability(html: string, url: string) {
-  const dom = new JSDOM(html, { url });
-  const reader = new Readability(dom.window.document);
-  return reader.parse();
+  // Strip unnecessary content first for faster parsing
+  const startStrip = Date.now();
+  const strippedHtml = stripUnnecessaryHtml(html);
+  console.log(`⏱️  Stripped HTML: ${html.length} → ${strippedHtml.length} bytes (${Date.now() - startStrip}ms)`);
+
+  // Use linkedom instead of jsdom for faster parsing
+  const startParse = Date.now();
+  const { document } = parseHTML(strippedHtml);
+  console.log(`⏱️  DOM parsed in ${Date.now() - startParse}ms`);
+
+  // Set the document URL for Readability
+  Object.defineProperty(document, "baseURI", { value: url });
+  Object.defineProperty(document, "documentURI", { value: url });
+
+  const startRead = Date.now();
+  const reader = new Readability(document as unknown as Document);
+  const result = reader.parse();
+  console.log(`⏱️  Readability extracted in ${Date.now() - startRead}ms`);
+
+  return result;
 }
 
 async function main() {

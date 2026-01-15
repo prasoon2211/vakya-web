@@ -1,22 +1,24 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
-import { JSDOM } from "jsdom";
+import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import { db, users, articles } from "@/lib/db";
 import { eq, and, sql } from "drizzle-orm";
 import { getCefrGuidelines } from "@/lib/cefr-guidelines";
 import {
-  AppError,
   FetchError,
   ExtractionError,
   ContentTooShortError,
-  TranslationError,
   toAppError,
   type ArticleStatus,
 } from "@/lib/errors";
-import { handleApiError, unauthorized, badRequest } from "@/lib/api-error-handler";
-import { withTimeout, withRetry } from "@/lib/utils/async";
+import {
+  handleApiError,
+  unauthorized,
+  badRequest,
+} from "@/lib/api-error-handler";
+import { withTimeout } from "@/lib/utils/async";
 
 // Lazy-init Gemini client
 let geminiClient: GoogleGenAI | null = null;
@@ -158,7 +160,11 @@ async function fetchHtmlViaJina(
     );
 
     if (!response.ok) {
-      return { html: "", success: false, error: `Jina HTTP ${response.status}` };
+      return {
+        html: "",
+        success: false,
+        error: `Jina HTTP ${response.status}`,
+      };
     }
 
     const html = await response.text();
@@ -181,34 +187,75 @@ async function fetchArticleHtml(
   const directResult = await fetchHtmlDirect(url);
 
   if (directResult.success) {
-    console.log(`[${articleId}] Direct fetch succeeded (${directResult.html.length} bytes)`);
+    console.log(
+      `[${articleId}] Direct fetch succeeded (${directResult.html.length} bytes)`
+    );
     return { html: directResult.html, method: "direct" };
   }
 
-  console.log(`[${articleId}] Direct fetch failed: ${directResult.error}. Falling back to Jina...`);
+  console.log(
+    `[${articleId}] Direct fetch failed: ${directResult.error}. Falling back to Jina...`
+  );
 
   const jinaResult = await fetchHtmlViaJina(url);
 
   if (jinaResult.success) {
-    console.log(`[${articleId}] Jina fetch succeeded (${jinaResult.html.length} bytes)`);
+    console.log(
+      `[${articleId}] Jina fetch succeeded (${jinaResult.html.length} bytes)`
+    );
     return { html: jinaResult.html, method: "jina" };
   }
 
   console.log(`[${articleId}] Jina fetch also failed: ${jinaResult.error}`);
-  throw new FetchError(url, `Direct: ${directResult.error}, Jina: ${jinaResult.error}`);
+  throw new FetchError(
+    url,
+    `Direct: ${directResult.error}, Jina: ${jinaResult.error}`
+  );
 }
 
 // ============================================================================
 // Content Extraction
 // ============================================================================
 
+/**
+ * Strip unnecessary HTML elements before parsing to speed up DOM creation
+ * Removes scripts, styles, SVGs, comments, etc. that Readability doesn't need
+ */
+function stripUnnecessaryHtml(html: string): string {
+  return (
+    html
+      // Remove script tags and contents
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+      // Remove style tags and contents
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+      // Remove SVG tags and contents
+      .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, "")
+      // Remove noscript tags
+      .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, "")
+      // Remove HTML comments
+      .replace(/<!--[\s\S]*?-->/g, "")
+      // Remove inline event handlers
+      .replace(/\s+on\w+="[^"]*"/gi, "")
+      .replace(/\s+on\w+='[^']*'/gi, "")
+  );
+}
+
 function extractArticleContent(
   html: string,
   url: string
 ): { title: string; content: string } | null {
   try {
-    const dom = new JSDOM(html, { url });
-    const reader = new Readability(dom.window.document);
+    // Strip unnecessary content for faster parsing
+    const strippedHtml = stripUnnecessaryHtml(html);
+
+    // Use linkedom instead of jsdom for much faster parsing
+    const { document } = parseHTML(strippedHtml);
+
+    // Set document URL for Readability
+    Object.defineProperty(document, "baseURI", { value: url });
+    Object.defineProperty(document, "documentURI", { value: url });
+
+    const reader = new Readability(document as unknown as Document);
     const article = reader.parse();
 
     if (!article) return null;
@@ -262,9 +309,9 @@ function getSiteConfig(url: string): SiteConfig | null {
 // ============================================================================
 
 const CHUNK_CONFIG = {
-  MIN_WORDS: 50,
-  TARGET_WORDS: 250,
-  MAX_WORDS: 500,
+  MIN_WORDS: 250,
+  TARGET_WORDS: 1500,
+  MAX_WORDS: 2500,
 };
 
 function countWords(text: string): number {
@@ -406,7 +453,9 @@ ${sample}`;
     const detected = response.text?.trim();
     if (detected) {
       const normalized = detected.replace(/[^a-zA-Z]/g, "");
-      return normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
+      return (
+        normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase()
+      );
     }
   } catch (error) {
     console.error("Language detection error:", error);
@@ -435,30 +484,36 @@ async function translateChunk(
   const returnCleanOriginal = options?.returnCleanOriginal ?? false;
 
   const outputInstructions = returnCleanOriginal
-    ? `Return JSON format:
+    ? `Output JSON:
 {
-  "original": "the CLEAN extracted article text in the SOURCE language",
-  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level",
-  "bridge": "English translation that maps EXACTLY 1-1 to your translated text"
+  "original": "cleaned source text (no HTML/ads)",
+  "translated": "your ${targetLanguage} translation",
+  "bridge": "literal English translation of your ${targetLanguage} output"
 }`
-    : `Return JSON format:
+    : `Output JSON:
 {
-  "original": "the source text you received (preserve it exactly)",
-  "translated": "the complete adapted ${targetLanguage} text at ${cefrLevel} level",
-  "bridge": "English translation that maps EXACTLY 1-1 to your translated text"
+  "original": "source text unchanged",
+  "translated": "your ${targetLanguage} translation",
+  "bridge": "literal English translation of your ${targetLanguage} output"
 }`;
 
-  const prompt = `You are a professional language learning content adapter. Translate/adapt the following into ${targetLanguage} for a ${cefrLevel} learner.
+  const prompt = `Translate into ${targetLanguage} at ${cefrLevel} level.
 
+Keep the translation faithful:
+- Same meaning, same structure, same perspective
+- Quotes stay as quotes (don't convert to indirect speech)
+- First-person stays first-person
+
+Content rules:
+- INCLUDE: Article text, quotes, analysis, factual content
+- EXCLUDE: Navigation links, timestamps, "read more" prompts, subscription CTAs, breadcrumbs, author bios, social sharing text
+
+${cefrLevel} language constraints:
 ${levelGuidelines}
-
-## CONTENT RULES
-INCLUDE: News paragraphs, quotes, factual information, analysis
-EXCLUDE: HTML tags, subscription prompts, navigation, ads, "Read also" links
 
 ${outputInstructions}
 
-INPUT:
+Text:
 ${text}`;
 
   try {
@@ -507,7 +562,7 @@ async function processTranslation(
   existingBlocks: TranslationBlock[]
 ) {
   let paragraphs = existingParagraphs;
-  let translatedBlocks = [...existingBlocks];
+  const translatedBlocks = [...existingBlocks];
   let title = "Untitled";
 
   const siteConfig = getSiteConfig(sourceUrl);
@@ -528,8 +583,12 @@ async function processTranslation(
       if (siteConfig?.skipReadability) {
         console.log(`[${articleId}] Skipping Readability - passing HTML to AI`);
         contentForTranslation = fetchResult.html;
-        const titleMatch = fetchResult.html.match(/<title[^>]*>([^<]+)<\/title>/i);
-        title = titleMatch ? titleMatch[1].replace(/\s*[-|].*$/, "").trim() : "Untitled";
+        const titleMatch = fetchResult.html.match(
+          /<title[^>]*>([^<]+)<\/title>/i
+        );
+        title = titleMatch
+          ? titleMatch[1].replace(/\s*[-|].*$/, "").trim()
+          : "Untitled";
       } else {
         const extracted = extractArticleContent(fetchResult.html, sourceUrl);
 
@@ -582,13 +641,18 @@ async function processTranslation(
     const startIndex = translatedBlocks.length;
     const remainingParagraphs = paragraphs.slice(startIndex);
 
-    console.log(`[${articleId}] Starting translation: ${remainingParagraphs.length} chunks remaining`);
+    console.log(
+      `[${articleId}] Starting translation: ${remainingParagraphs.length} chunks remaining`
+    );
 
     for (let i = 0; i < remainingParagraphs.length; i += MAX_PARALLEL) {
       const wave = remainingParagraphs.slice(i, i + MAX_PARALLEL);
 
       console.log(
-        `[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, remainingParagraphs.length)}`
+        `[${articleId}] Translating chunks ${i + 1}-${Math.min(
+          i + MAX_PARALLEL,
+          remainingParagraphs.length
+        )}`
       );
 
       const translateOptions = siteConfig?.returnCleanOriginal
@@ -596,7 +660,9 @@ async function processTranslation(
         : undefined;
 
       const results = await Promise.allSettled(
-        wave.map((chunk) => translateChunk(chunk, targetLanguage, cefrLevel, translateOptions))
+        wave.map((chunk) =>
+          translateChunk(chunk, targetLanguage, cefrLevel, translateOptions)
+        )
       );
 
       for (let j = 0; j < results.length; j++) {
@@ -620,7 +686,10 @@ async function processTranslation(
       }
 
       // Save progress after each wave
-      const progress = Math.min(startIndex + i + MAX_PARALLEL, paragraphs.length);
+      const progress = Math.min(
+        startIndex + i + MAX_PARALLEL,
+        paragraphs.length
+      );
       await db
         .update(articles)
         .set({
@@ -676,13 +745,18 @@ async function processTextTranslation(
 
     const MAX_PARALLEL = 15;
 
-    console.log(`[${articleId}] Starting text translation: ${paragraphs.length} chunks`);
+    console.log(
+      `[${articleId}] Starting text translation: ${paragraphs.length} chunks`
+    );
 
     for (let i = 0; i < paragraphs.length; i += MAX_PARALLEL) {
       const wave = paragraphs.slice(i, i + MAX_PARALLEL);
 
       console.log(
-        `[${articleId}] Translating chunks ${i + 1}-${Math.min(i + MAX_PARALLEL, paragraphs.length)}`
+        `[${articleId}] Translating chunks ${i + 1}-${Math.min(
+          i + MAX_PARALLEL,
+          paragraphs.length
+        )}`
       );
 
       const results = await Promise.allSettled(
@@ -716,7 +790,9 @@ async function processTextTranslation(
         })
         .where(eq(articles.id, articleId));
 
-      console.log(`[${articleId}] Progress: ${translatedBlocks.length}/${paragraphs.length}`);
+      console.log(
+        `[${articleId}] Progress: ${translatedBlocks.length}/${paragraphs.length}`
+      );
     }
 
     const wordCount = translatedBlocks.reduce((acc, block) => {
@@ -729,7 +805,9 @@ async function processTextTranslation(
       translationProgress: paragraphs.length,
     });
 
-    console.log(`[${articleId}] Text translation completed! ${wordCount} words`);
+    console.log(
+      `[${articleId}] Text translation completed! ${wordCount} words`
+    );
   } catch (error) {
     console.error(`[${articleId}] Text translation error:`, error);
 
@@ -764,7 +842,9 @@ export async function POST(request: Request) {
     // Validate input
     if (type === "url") {
       if (!url || !targetLanguage || !cefrLevel) {
-        return badRequest("Missing required fields: url, targetLanguage, cefrLevel");
+        return badRequest(
+          "Missing required fields: url, targetLanguage, cefrLevel"
+        );
       }
       try {
         new URL(url);
@@ -773,7 +853,9 @@ export async function POST(request: Request) {
       }
     } else if (type === "text") {
       if (!text || !title || !targetLanguage || !cefrLevel) {
-        return badRequest("Missing required fields: text, title, targetLanguage, cefrLevel");
+        return badRequest(
+          "Missing required fields: text, title, targetLanguage, cefrLevel"
+        );
       }
       if (text.trim().length < 50) {
         return badRequest("Text must be at least 50 characters");
@@ -822,7 +904,12 @@ export async function POST(request: Request) {
       const articleId = newArticle.id;
 
       // Start background processing
-      processTextTranslation(articleId, paragraphs, targetLanguage, cefrLevel).catch((error) => {
+      processTextTranslation(
+        articleId,
+        paragraphs,
+        targetLanguage,
+        cefrLevel
+      ).catch((error) => {
         console.error(`[${articleId}] Background processing error:`, error);
       });
 
@@ -890,7 +977,9 @@ export async function POST(request: Request) {
         })
         .where(eq(articles.id, articleId));
 
-      console.log(`[${articleId}] Resuming article (${existingBlocks.length}/${paragraphs.length} done)`);
+      console.log(
+        `[${articleId}] Resuming article (${existingBlocks.length}/${paragraphs.length} done)`
+      );
     } else {
       // Create new article immediately with "queued" status
       // This ensures the article appears in the user's list right away
