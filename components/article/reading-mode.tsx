@@ -1,12 +1,18 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { X, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Languages, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReadingModeText } from "./reading-mode-text";
 import { findWordAtTime, WordTimestamp } from "@/lib/audio/align-timestamps";
 import { cn } from "@/lib/utils";
+
+interface TranslationBlock {
+  original: string;
+  translated: string;
+  bridge?: string;
+}
 
 interface ReadingModeProps {
   audioUrl: string;
@@ -15,9 +21,11 @@ interface ReadingModeProps {
   articleId: string;
   onClose: () => void;
   initialWordIndex?: number; // Start from this word (will snap to sentence start)
+  blocks?: TranslationBlock[]; // Translation blocks with bridge text
 }
 
 const PLAYBACK_SPEEDS = [0.75, 1, 1.25];
+const BRIDGE_CONTEXT_KEY = "vakya-bridge-context-enabled";
 
 // Helper to detect sentence boundaries
 function isSentenceEnd(word: string): boolean {
@@ -34,6 +42,162 @@ function findSentenceStart(timestamps: WordTimestamp[], wordIndex: number): numb
   return idx;
 }
 
+// Parse bridge text into sentences with their character positions
+interface BridgeSentence {
+  text: string;
+  charStart: number;
+  charEnd: number;
+}
+
+function parseBridgeSentences(text: string): BridgeSentence[] {
+  if (!text.trim()) return [];
+
+  const sentences: BridgeSentence[] = [];
+  const regex = /[^.!?]*[.!?]+/g;
+  let match;
+  let lastEnd = 0;
+
+  while ((match = regex.exec(text)) !== null) {
+    const sentenceText = match[0].trim();
+    if (sentenceText) {
+      sentences.push({
+        text: sentenceText,
+        charStart: match.index,
+        charEnd: match.index + match[0].length,
+      });
+    }
+    lastEnd = match.index + match[0].length;
+  }
+
+  // Handle remaining text without sentence-ending punctuation
+  if (lastEnd < text.length) {
+    const remaining = text.slice(lastEnd).trim();
+    if (remaining) {
+      sentences.push({
+        text: remaining,
+        charStart: lastEnd,
+        charEnd: text.length,
+      });
+    }
+  }
+
+  return sentences;
+}
+
+// Extract bridge context using percentage-based position mapping
+// Shows ~400 chars of context, snapped to sentence boundaries
+function extractBridgeContext(
+  fullBridgeText: string,
+  bridgeSentences: BridgeSentence[],
+  currentWordIndex: number,
+  totalTranslatedWords: number,
+  debug: boolean = false
+): string {
+  const WINDOW_SIZE = 400; // ~6-8 sentences of context
+  const EDGE_BUFFER_PERCENT = 0.03; // 3% at edges
+
+  if (!fullBridgeText || bridgeSentences.length === 0 || totalTranslatedWords === 0) {
+    if (debug) {
+      console.log("[BridgeContext] Empty: no text, sentences, or words");
+    }
+    return "";
+  }
+
+  const bridgeLength = fullBridgeText.length;
+
+  // Calculate reading position as percentage (0 to 1)
+  const readingPercent = totalTranslatedWords <= 1
+    ? 0
+    : Math.min(1, currentWordIndex / (totalTranslatedWords - 1));
+
+  // Map to target character position in bridge text
+  let targetCharPos = Math.floor(readingPercent * bridgeLength);
+  const originalTargetCharPos = targetCharPos;
+
+  // Edge handling: At start, keep window at beginning until we've read enough
+  // At end, keep window at end
+  const halfWindow = WINDOW_SIZE / 2;
+
+  if (readingPercent < EDGE_BUFFER_PERCENT) {
+    // Near start: window starts at 0, don't shift yet
+    targetCharPos = Math.min(targetCharPos, halfWindow);
+  } else if (readingPercent > 1 - EDGE_BUFFER_PERCENT) {
+    // Near end: window ends at bridgeLength
+    targetCharPos = Math.max(targetCharPos, bridgeLength - halfWindow);
+  }
+
+  // Calculate raw window bounds
+  let windowStart = Math.max(0, targetCharPos - halfWindow);
+  let windowEnd = Math.min(bridgeLength, targetCharPos + halfWindow);
+
+  // Clamp window to text bounds
+  if (windowStart === 0) {
+    windowEnd = Math.min(bridgeLength, WINDOW_SIZE);
+  }
+  if (windowEnd === bridgeLength) {
+    windowStart = Math.max(0, bridgeLength - WINDOW_SIZE);
+  }
+
+  // Find the CENTER sentence - the one containing the target character position
+  let centerSentenceIndex = 0;
+  for (let i = 0; i < bridgeSentences.length; i++) {
+    const sentence = bridgeSentences[i];
+    if (targetCharPos >= sentence.charStart && targetCharPos < sentence.charEnd) {
+      centerSentenceIndex = i;
+      break;
+    }
+    // If we're past all sentences, use the last one
+    if (i === bridgeSentences.length - 1) {
+      centerSentenceIndex = i;
+    }
+  }
+
+  // Start with center sentence, add 1 before for context, then fill with sentences after
+  const includedSentences: string[] = [bridgeSentences[centerSentenceIndex].text];
+  const includedSentenceIndices: number[] = [centerSentenceIndex];
+  let totalLength = bridgeSentences[centerSentenceIndex].text.length;
+
+  // Add just 1 sentence before for context (if available)
+  if (centerSentenceIndex > 0) {
+    const beforeSentence = bridgeSentences[centerSentenceIndex - 1];
+    includedSentences.unshift(beforeSentence.text);
+    includedSentenceIndices.unshift(centerSentenceIndex - 1);
+    totalLength += beforeSentence.text.length + 1;
+  }
+
+  // Fill remaining space with sentences after
+  let afterIdx = centerSentenceIndex + 1;
+  while (totalLength < WINDOW_SIZE && afterIdx < bridgeSentences.length) {
+    const afterSentence = bridgeSentences[afterIdx];
+    if (totalLength + afterSentence.text.length + 1 <= WINDOW_SIZE + 100) {
+      includedSentences.push(afterSentence.text);
+      includedSentenceIndices.push(afterIdx);
+      totalLength += afterSentence.text.length + 1;
+      afterIdx++;
+    } else {
+      break;
+    }
+  }
+
+  if (debug) {
+    // Get a snippet of the bridge text around the target position
+    const snippetStart = Math.max(0, targetCharPos - 30);
+    const snippetEnd = Math.min(bridgeLength, targetCharPos + 30);
+    const bridgeSnippet = fullBridgeText.substring(snippetStart, snippetEnd);
+
+    // Compact format: word|%|charPos|centerSentence|sentences|snippet
+    console.log(
+      `[Bridge] word=${currentWordIndex}/${totalTranslatedWords} (${(readingPercent * 100).toFixed(1)}%) | ` +
+      `char=${targetCharPos} | ` +
+      `center=${centerSentenceIndex} | ` +
+      `showing=[${includedSentenceIndices.join(',')}] | ` +
+      `"...${bridgeSnippet.replace(/\n/g, ' ')}..."`
+    );
+  }
+
+  return includedSentences.join(" ");
+}
+
 export function ReadingMode({
   audioUrl,
   timestamps,
@@ -41,6 +205,7 @@ export function ReadingMode({
   articleId,
   onClose,
   initialWordIndex = 0,
+  blocks = [],
 }: ReadingModeProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -53,6 +218,59 @@ export function ReadingMode({
   const startingWordIndex = findSentenceStart(timestamps, initialWordIndex);
   const [currentWordIndex, setCurrentWordIndex] = useState(startingWordIndex);
   const [wasPlayingBeforeTap, setWasPlayingBeforeTap] = useState(false);
+
+  // Bridge context state
+  const [showBridgeContext, setShowBridgeContext] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(BRIDGE_CONTEXT_KEY) === "true";
+    }
+    return false;
+  });
+  const [displayedBridgeText, setDisplayedBridgeText] = useState("");
+
+  // Combine all bridge text from blocks
+  const fullBridgeText = useMemo(() => {
+    return blocks
+      .map(block => block.bridge || "")
+      .filter(Boolean)
+      .join(" ");
+  }, [blocks]);
+
+  // Check if bridge text is available
+  const hasBridge = fullBridgeText.length > 0;
+
+  // Parse bridge text into sentences with character positions
+  const bridgeSentences = useMemo(() => {
+    if (!fullBridgeText) return [];
+    return parseBridgeSentences(fullBridgeText);
+  }, [fullBridgeText]);
+
+  // Toggle bridge context and persist
+  const toggleBridgeContext = useCallback(() => {
+    setShowBridgeContext(prev => {
+      const newValue = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(BRIDGE_CONTEXT_KEY, String(newValue));
+      }
+      return newValue;
+    });
+  }, []);
+
+  // Update bridge context based on current word position
+  // Uses percentage mapping and shows complete sentences within a ~400 char window
+  useEffect(() => {
+    if (!hasBridge) return;
+
+    const context = extractBridgeContext(
+      fullBridgeText,
+      bridgeSentences,
+      currentWordIndex,
+      timestamps.length,
+      true // Enable debug logging
+    );
+
+    setDisplayedBridgeText(context);
+  }, [currentWordIndex, hasBridge, fullBridgeText, bridgeSentences, timestamps.length]);
 
   // Update current word based on audio time (only during playback)
   // When manually navigating via goToWord, we set currentWordIndex directly
@@ -304,6 +522,39 @@ export function ReadingMode({
         articleId={articleId}
         isPlaying={isPlaying}
       />
+
+      {/* Bridge Context Panel */}
+      {hasBridge && (
+        <div className="border-t border-[#e8dfd3] bg-[#f3ede4]/80">
+          {/* Toggle button */}
+          <button
+            onClick={toggleBridgeContext}
+            className="w-full flex items-center justify-center gap-2 py-2 text-xs text-[#6b6b6b] hover:text-[#1a1a1a] transition-colors"
+          >
+            <Languages className="h-3.5 w-3.5" />
+            <span>English context</span>
+            {showBridgeContext ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronUp className="h-3.5 w-3.5" />
+            )}
+          </button>
+
+          {/* Context text with smooth transition */}
+          <div
+            className={cn(
+              "overflow-hidden transition-all duration-300 ease-in-out",
+              showBridgeContext ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+            )}
+          >
+            <div className="px-4 pb-3">
+              <p className="text-sm text-[#4a4a4a] leading-relaxed transition-opacity duration-200">
+                {displayedBridgeText || "..."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="bg-white border-t border-[#e8dfd3] px-4 pt-4 pb-6">

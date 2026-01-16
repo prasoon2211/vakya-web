@@ -711,6 +711,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           articleId={article.id}
           onClose={() => setShowReadingMode(false)}
           initialWordIndex={initialReadingWordIndex}
+          blocks={blocks}
         />
       )}
 
