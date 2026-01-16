@@ -84,118 +84,42 @@ function parseBridgeSentences(text: string): BridgeSentence[] {
   return sentences;
 }
 
-// Extract bridge context using percentage-based position mapping
-// Shows ~400 chars of context, snapped to sentence boundaries
-function extractBridgeContext(
-  fullBridgeText: string,
+// Calculate which sentence contains the target character position
+function findCenterSentence(
   bridgeSentences: BridgeSentence[],
+  fullBridgeText: string,
   currentWordIndex: number,
-  totalTranslatedWords: number,
-  debug: boolean = false
-): string {
-  const WINDOW_SIZE = 400; // ~6-8 sentences of context
-  const EDGE_BUFFER_PERCENT = 0.03; // 3% at edges
-
-  if (!fullBridgeText || bridgeSentences.length === 0 || totalTranslatedWords === 0) {
-    if (debug) {
-      console.log("[BridgeContext] Empty: no text, sentences, or words");
-    }
-    return "";
-  }
+  totalTranslatedWords: number
+): number {
+  if (bridgeSentences.length === 0 || totalTranslatedWords === 0) return 0;
 
   const bridgeLength = fullBridgeText.length;
-
-  // Calculate reading position as percentage (0 to 1)
   const readingPercent = totalTranslatedWords <= 1
     ? 0
     : Math.min(1, currentWordIndex / (totalTranslatedWords - 1));
 
-  // Map to target character position in bridge text
-  let targetCharPos = Math.floor(readingPercent * bridgeLength);
-  const originalTargetCharPos = targetCharPos;
+  const targetCharPos = Math.floor(readingPercent * bridgeLength);
 
-  // Edge handling: At start, keep window at beginning until we've read enough
-  // At end, keep window at end
-  const halfWindow = WINDOW_SIZE / 2;
-
-  if (readingPercent < EDGE_BUFFER_PERCENT) {
-    // Near start: window starts at 0, don't shift yet
-    targetCharPos = Math.min(targetCharPos, halfWindow);
-  } else if (readingPercent > 1 - EDGE_BUFFER_PERCENT) {
-    // Near end: window ends at bridgeLength
-    targetCharPos = Math.max(targetCharPos, bridgeLength - halfWindow);
-  }
-
-  // Calculate raw window bounds
-  let windowStart = Math.max(0, targetCharPos - halfWindow);
-  let windowEnd = Math.min(bridgeLength, targetCharPos + halfWindow);
-
-  // Clamp window to text bounds
-  if (windowStart === 0) {
-    windowEnd = Math.min(bridgeLength, WINDOW_SIZE);
-  }
-  if (windowEnd === bridgeLength) {
-    windowStart = Math.max(0, bridgeLength - WINDOW_SIZE);
-  }
-
-  // Find the CENTER sentence - the one containing the target character position
-  let centerSentenceIndex = 0;
   for (let i = 0; i < bridgeSentences.length; i++) {
     const sentence = bridgeSentences[i];
     if (targetCharPos >= sentence.charStart && targetCharPos < sentence.charEnd) {
-      centerSentenceIndex = i;
-      break;
-    }
-    // If we're past all sentences, use the last one
-    if (i === bridgeSentences.length - 1) {
-      centerSentenceIndex = i;
+      return i;
     }
   }
+  return bridgeSentences.length - 1;
+}
 
-  // Start with center sentence, add 1 before for context, then fill with sentences after
-  const includedSentences: string[] = [bridgeSentences[centerSentenceIndex].text];
-  const includedSentenceIndices: number[] = [centerSentenceIndex];
-  let totalLength = bridgeSentences[centerSentenceIndex].text.length;
-
-  // Add just 1 sentence before for context (if available)
-  if (centerSentenceIndex > 0) {
-    const beforeSentence = bridgeSentences[centerSentenceIndex - 1];
-    includedSentences.unshift(beforeSentence.text);
-    includedSentenceIndices.unshift(centerSentenceIndex - 1);
-    totalLength += beforeSentence.text.length + 1;
-  }
-
-  // Fill remaining space with sentences after
-  let afterIdx = centerSentenceIndex + 1;
-  while (totalLength < WINDOW_SIZE && afterIdx < bridgeSentences.length) {
-    const afterSentence = bridgeSentences[afterIdx];
-    if (totalLength + afterSentence.text.length + 1 <= WINDOW_SIZE + 100) {
-      includedSentences.push(afterSentence.text);
-      includedSentenceIndices.push(afterIdx);
-      totalLength += afterSentence.text.length + 1;
-      afterIdx++;
-    } else {
-      break;
-    }
-  }
-
-  if (debug) {
-    // Get a snippet of the bridge text around the target position
-    const snippetStart = Math.max(0, targetCharPos - 30);
-    const snippetEnd = Math.min(bridgeLength, targetCharPos + 30);
-    const bridgeSnippet = fullBridgeText.substring(snippetStart, snippetEnd);
-
-    // Compact format: word|%|charPos|centerSentence|sentences|snippet
-    console.log(
-      `[Bridge] word=${currentWordIndex}/${totalTranslatedWords} (${(readingPercent * 100).toFixed(1)}%) | ` +
-      `char=${targetCharPos} | ` +
-      `center=${centerSentenceIndex} | ` +
-      `showing=[${includedSentenceIndices.join(',')}] | ` +
-      `"...${bridgeSnippet.replace(/\n/g, ' ')}..."`
-    );
-  }
-
-  return includedSentences.join(" ");
+// Build display text from a stable window of sentences
+function buildBridgeContextFromWindow(
+  bridgeSentences: BridgeSentence[],
+  windowStart: number,
+  windowSize: number
+): string {
+  const endIdx = Math.min(windowStart + windowSize, bridgeSentences.length);
+  return bridgeSentences
+    .slice(windowStart, endIdx)
+    .map(s => s.text)
+    .join(" ");
 }
 
 export function ReadingMode({
@@ -226,7 +150,11 @@ export function ReadingMode({
     }
     return false;
   });
-  const [displayedBridgeText, setDisplayedBridgeText] = useState("");
+
+  // Stable window state - only shifts when center approaches edge
+  const WINDOW_SIZE = 6; // Number of sentences to show
+  const BUFFER = 1; // How close to edge before shifting
+  const [windowStartIdx, setWindowStartIdx] = useState(0);
 
   // Combine all bridge text from blocks
   const fullBridgeText = useMemo(() => {
@@ -245,6 +173,12 @@ export function ReadingMode({
     return parseBridgeSentences(fullBridgeText);
   }, [fullBridgeText]);
 
+  // Calculate current center sentence (changes frequently, but doesn't cause text rebuild)
+  const centerSentenceIdx = useMemo(() => {
+    if (!hasBridge || bridgeSentences.length === 0) return 0;
+    return findCenterSentence(bridgeSentences, fullBridgeText, currentWordIndex, timestamps.length);
+  }, [hasBridge, bridgeSentences, fullBridgeText, currentWordIndex, timestamps.length]);
+
   // Toggle bridge context and persist
   const toggleBridgeContext = useCallback(() => {
     setShowBridgeContext(prev => {
@@ -256,21 +190,44 @@ export function ReadingMode({
     });
   }, []);
 
-  // Update bridge context based on current word position
-  // Uses percentage mapping and shows complete sentences within a ~400 char window
+  // Update window position only when center approaches edge (hysteresis)
+  // This keeps the display stable for several sentences of reading
   useEffect(() => {
-    if (!hasBridge) return;
+    if (!hasBridge || bridgeSentences.length === 0) return;
 
-    const context = extractBridgeContext(
-      fullBridgeText,
-      bridgeSentences,
-      currentWordIndex,
-      timestamps.length,
-      true // Enable debug logging
-    );
+    const windowEndIdx = windowStartIdx + WINDOW_SIZE - 1;
 
-    setDisplayedBridgeText(context);
-  }, [currentWordIndex, hasBridge, fullBridgeText, bridgeSentences, timestamps.length]);
+    let newWindowStart = windowStartIdx;
+
+    // If center is near/past the end of visible window, shift forward
+    if (centerSentenceIdx > windowEndIdx - BUFFER) {
+      // Shift so center is near the start of the new window
+      newWindowStart = Math.max(0, centerSentenceIdx - BUFFER);
+    }
+    // If center is near/before the start of visible window, shift backward
+    else if (centerSentenceIdx < windowStartIdx + BUFFER) {
+      // Shift so center is near the end of the new window
+      newWindowStart = Math.max(0, centerSentenceIdx - WINDOW_SIZE + BUFFER + 1);
+    }
+
+    // Clamp to valid range
+    newWindowStart = Math.max(0, Math.min(newWindowStart, bridgeSentences.length - WINDOW_SIZE));
+
+    if (newWindowStart !== windowStartIdx) {
+      setWindowStartIdx(newWindowStart);
+      console.log(
+        `[Bridge] Window shift: center=${centerSentenceIdx}, ` +
+        `old=[${windowStartIdx}-${windowStartIdx + WINDOW_SIZE - 1}], ` +
+        `new=[${newWindowStart}-${newWindowStart + WINDOW_SIZE - 1}]`
+      );
+    }
+  }, [centerSentenceIdx, windowStartIdx, hasBridge, bridgeSentences.length]);
+
+  // Build display text from stable window (only changes when windowStartIdx changes)
+  const displayedBridgeText = useMemo(() => {
+    if (!hasBridge || bridgeSentences.length === 0) return "";
+    return buildBridgeContextFromWindow(bridgeSentences, windowStartIdx, WINDOW_SIZE);
+  }, [hasBridge, bridgeSentences, windowStartIdx]);
 
   // Update current word based on audio time (only during playback)
   // When manually navigating via goToWord, we set currentWordIndex directly
