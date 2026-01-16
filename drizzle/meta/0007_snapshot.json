@@ -1,5 +1,5 @@
 {
-  "id": "ab521b1e-5e3d-46e1-8e98-297134c6059a",
+  "id": "b8d5a18d-d4c7-4c11-b819-e3a11cdf09aa",
   "prevId": "7e5e443b-1b84-4437-aa98-6bdb4116878a",
   "version": "7",
   "dialect": "postgresql",
@@ -206,8 +206,8 @@
           "notNull": true,
           "default": 0
         },
-        "bookmark_paragraph": {
-          "name": "bookmark_paragraph",
+        "bookmark_word_index": {
+          "name": "bookmark_word_index",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
