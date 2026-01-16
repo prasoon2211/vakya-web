@@ -312,6 +312,40 @@ export const TranslatedText = forwardRef<TranslatedTextRef, TranslatedTextProps>
   const viewMode = onViewModeChange ? externalViewMode : internalViewMode;
   const setViewMode = onViewModeChange || setInternalViewMode;
 
+  // Track previous view mode for scroll sync
+  const prevViewModeRef = useRef<ViewMode>(viewMode);
+  const scrollPercentRef = useRef<number>(0);
+
+  // Capture scroll percentage while scrolling
+  useEffect(() => {
+    const scrollWrapper = document.getElementById("app-scroll-wrapper");
+    if (!scrollWrapper) return;
+
+    const handleScroll = () => {
+      const maxScroll = scrollWrapper.scrollHeight - scrollWrapper.clientHeight;
+      scrollPercentRef.current = maxScroll > 0 ? scrollWrapper.scrollTop / maxScroll : 0;
+    };
+
+    scrollWrapper.addEventListener("scroll", handleScroll, { passive: true });
+    return () => scrollWrapper.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Sync scroll position when view mode changes
+  useEffect(() => {
+    if (prevViewModeRef.current === viewMode) return;
+    prevViewModeRef.current = viewMode;
+
+    // Use requestAnimationFrame to ensure DOM has updated with new view
+    requestAnimationFrame(() => {
+      const scrollWrapper = document.getElementById("app-scroll-wrapper");
+      if (!scrollWrapper) return;
+
+      const maxScroll = scrollWrapper.scrollHeight - scrollWrapper.clientHeight;
+      const newScrollTop = scrollPercentRef.current * maxScroll;
+      scrollWrapper.scrollTo({ top: newScrollTop, behavior: "instant" });
+    });
+  }, [viewMode]);
+
   // Handle setting bookmark
   const handleSetBookmark = useCallback(async (wordIndex: number) => {
     const success = await saveBookmark(articleId, wordIndex);
