@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Loader2, Sparkles, Bookmark, Check, ChevronDown, ExternalLink } from "lucide-react";
+import {
+  Loader2,
+  Sparkles,
+  Bookmark,
+  Check,
+  ChevronDown,
+  ExternalLink,
+} from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +17,11 @@ interface WordTooltipProps {
   contextSentence?: string;
   targetLanguage: string;
   articleId?: string;
+  // Bookmark support
+  wordIndex?: number;
+  isBookmarked?: boolean;
+  onSetBookmark?: (wordIndex: number) => void;
+  onRemoveBookmark?: () => void;
 }
 
 interface DictionaryResult {
@@ -68,25 +80,29 @@ const wiktionaryLanguageCodes: Record<string, string> = {
 };
 
 // Extract base word from inflection notes like "past participle of konzentrieren" or "from: Hund"
-function parseInflectionNote(note: string): { prefix: string; baseWord: string } | null {
+function parseInflectionNote(
+  note: string
+): { prefix: string; baseWord: string } | null {
   // Pattern 1: "X of word" (most common)
   const ofMatch = note.match(/^(.+?\s+of\s+)([a-zA-ZÀ-ÿ\-]+)$/i);
   if (ofMatch) {
     return { prefix: ofMatch[1], baseWord: ofMatch[2] };
   }
-  
+
   // Pattern 2: "from: word"
   const fromMatch = note.match(/^(from:\s*)([a-zA-ZÀ-ÿ\-]+)$/i);
   if (fromMatch) {
     return { prefix: fromMatch[1], baseWord: fromMatch[2] };
   }
-  
+
   return null;
 }
 
 function getWiktionaryUrl(word: string, language: string): string {
   const langAnchor = wiktionaryLanguageCodes[language] || language;
-  return `https://en.wiktionary.org/wiki/${encodeURIComponent(word)}#${encodeURIComponent(langAnchor)}`;
+  return `https://en.wiktionary.org/wiki/${encodeURIComponent(
+    word
+  )}#${encodeURIComponent(langAnchor)}`;
 }
 
 export function WordTooltip({
@@ -94,8 +110,13 @@ export function WordTooltip({
   contextSentence,
   targetLanguage,
   articleId,
+  wordIndex,
+  isBookmarked,
+  onSetBookmark,
+  onRemoveBookmark,
 }: WordTooltipProps) {
-  const [dictionaryResult, setDictionaryResult] = useState<DictionaryResult | null>(null);
+  const [dictionaryResult, setDictionaryResult] =
+    useState<DictionaryResult | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [isLoadingDict, setIsLoadingDict] = useState(true);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
@@ -117,7 +138,11 @@ export function WordTooltip({
       const data = await res.json();
       setAiAnalysis(data);
     } catch {
-      toast({ title: "Analysis failed", description: "Please try again", variant: "error" });
+      toast({
+        title: "Analysis failed",
+        description: "Please try again",
+        variant: "error",
+      });
     } finally {
       setIsLoadingAI(false);
     }
@@ -126,7 +151,9 @@ export function WordTooltip({
   const fetchDictionary = useCallback(async () => {
     try {
       const res = await fetch(
-        `/api/word/lookup?word=${encodeURIComponent(word)}&language=${encodeURIComponent(targetLanguage)}`
+        `/api/word/lookup?word=${encodeURIComponent(
+          word
+        )}&language=${encodeURIComponent(targetLanguage)}`
       );
       const data = await res.json();
       setDictionaryResult(data);
@@ -168,7 +195,10 @@ export function WordTooltip({
       if (!res.ok) {
         const error = await res.json();
         if (error.error?.includes("duplicate")) {
-          toast({ title: "Word already saved", description: "This word is already in your vocabulary" });
+          toast({
+            title: "Word already saved",
+            description: "This word is already in your vocabulary",
+          });
           setIsSaved(true);
           return;
         }
@@ -178,13 +208,17 @@ export function WordTooltip({
       setIsSaved(true);
       toast({
         title: "Word saved!",
-        description: fetchDetails && !aiAnalysis ? "Details will be fetched in the background" : "Added to your vocabulary",
+        description:
+          fetchDetails && !aiAnalysis
+            ? "Details will be fetched in the background"
+            : "Added to your vocabulary",
         variant: "success",
       });
     } catch (error) {
       toast({
         title: "Failed to save word",
-        description: error instanceof Error ? error.message : "Please try again",
+        description:
+          error instanceof Error ? error.message : "Please try again",
         variant: "error",
       });
     } finally {
@@ -202,7 +236,9 @@ export function WordTooltip({
     French: { masculine: "le", feminine: "la" },
     Spanish: { masculine: "el", feminine: "la" },
   };
-  const resolvedArticle = article || (gender ? fallbackArticleByGender[targetLanguage]?.[gender] : null);
+  const resolvedArticle =
+    article ||
+    (gender ? fallbackArticleByGender[targetLanguage]?.[gender] : null);
   const translation = aiAnalysis?.translation || dictionaryResult?.translation;
   const definitions = dictionaryResult?.definitions || [];
   const primaryDefinition = translation || definitions[0];
@@ -210,12 +246,21 @@ export function WordTooltip({
   const parsedForms = dictionaryResult?.parsedForms;
   const explanation = aiAnalysis?.explanation;
 
-  const genderStyle = gender ? genderColors[gender as keyof typeof genderColors] : null;
+  const genderStyle = gender
+    ? genderColors[gender as keyof typeof genderColors]
+    : null;
   const hasForms = parsedForms && Object.keys(parsedForms).length > 0;
 
   // Grammar markers to extract as labels
-  const grammarMarkers = ["reflexive", "transitive", "intransitive", "auxiliary", "impersonal", "reciprocal"];
-  
+  const grammarMarkers = [
+    "reflexive",
+    "transitive",
+    "intransitive",
+    "auxiliary",
+    "impersonal",
+    "reciprocal",
+  ];
+
   // Form note triggers (these go in the inflection note area)
   const formNoteTriggers = [
     "participle",
@@ -258,19 +303,25 @@ export function WordTooltip({
     }
 
     // Then check for form notes at the end
-    const formMatch = (mainDefinition || primaryDefinition).match(/^(.*?)(?:\s*\(([^)]+)\))\s*$/);
+    const formMatch = (mainDefinition || primaryDefinition).match(
+      /^(.*?)(?:\s*\(([^)]+)\))\s*$/
+    );
     if (formMatch) {
       const note = formMatch[2]?.trim() || "";
       const noteLower = note.toLowerCase();
-      const isFormNote = formNoteTriggers.some(trigger => noteLower.includes(trigger));
+      const isFormNote = formNoteTriggers.some((trigger) =>
+        noteLower.includes(trigger)
+      );
       const isGrammarMarker = grammarMarkers.includes(noteLower);
 
       if (isFormNote) {
-        mainDefinition = formMatch[1].trim() || mainDefinition || primaryDefinition;
+        mainDefinition =
+          formMatch[1].trim() || mainDefinition || primaryDefinition;
         inflectionNote = note;
       } else if (isGrammarMarker && !grammarLabels.includes(noteLower)) {
         grammarLabels.push(noteLower);
-        mainDefinition = formMatch[1].trim() || mainDefinition || primaryDefinition;
+        mainDefinition =
+          formMatch[1].trim() || mainDefinition || primaryDefinition;
       }
     }
 
@@ -279,7 +330,10 @@ export function WordTooltip({
       const inlineMatch = mainDefinition.match(/^\(([^)]+)\)\s*(.+)$/);
       if (inlineMatch) {
         const marker = inlineMatch[1].toLowerCase().trim();
-        if (grammarMarkers.includes(marker) && !grammarLabels.includes(marker)) {
+        if (
+          grammarMarkers.includes(marker) &&
+          !grammarLabels.includes(marker)
+        ) {
           grammarLabels.push(marker);
           mainDefinition = inlineMatch[2];
         }
@@ -293,14 +347,16 @@ export function WordTooltip({
   }
 
   const hasPrimaryDefinition = Boolean(mainDefinition);
-  
+
   // Truncate long definitions
   const MAX_DEF_LENGTH = 80;
-  const isDefinitionLong = mainDefinition && mainDefinition.length > MAX_DEF_LENGTH;
+  const isDefinitionLong =
+    mainDefinition && mainDefinition.length > MAX_DEF_LENGTH;
   const [showFullDefinition, setShowFullDefinition] = useState(false);
-  const displayDefinition = mainDefinition && isDefinitionLong && !showFullDefinition
-    ? mainDefinition.slice(0, MAX_DEF_LENGTH).trim() + "…"
-    : mainDefinition;
+  const displayDefinition =
+    mainDefinition && isDefinitionLong && !showFullDefinition
+      ? mainDefinition.slice(0, MAX_DEF_LENGTH).trim() + "…"
+      : mainDefinition;
 
   // Filter out secondary definitions that duplicate the main definition
   // Extract core meaning words (strip grammar markers, parentheticals, brackets)
@@ -311,19 +367,36 @@ export function WordTooltip({
       .replace(/\[[^\]]*\]/g, "") // remove [with auf ...]
       .replace(/[.,;:!?'"]/g, "")
       .split(/\s+/)
-      .filter(word => word.length > 2) // skip tiny words
-      .filter(word => !["the", "to", "a", "an", "of", "on", "in", "for", "with", "and", "or"].includes(word))
+      .filter((word) => word.length > 2) // skip tiny words
+      .filter(
+        (word) =>
+          ![
+            "the",
+            "to",
+            "a",
+            "an",
+            "of",
+            "on",
+            "in",
+            "for",
+            "with",
+            "and",
+            "or",
+          ].includes(word)
+      )
       .sort()
       .join(" ")
       .trim();
   };
-  
+
   const mainCore = mainDefinition ? extractCoreMeaning(mainDefinition) : "";
-  
+
   const rawSecondaryDefinitions =
-    primaryDefinition && definitions[0] === primaryDefinition ? definitions.slice(1) : definitions;
-  
-  const secondaryDefinitions = rawSecondaryDefinitions.filter(def => {
+    primaryDefinition && definitions[0] === primaryDefinition
+      ? definitions.slice(1)
+      : definitions;
+
+  const secondaryDefinitions = rawSecondaryDefinitions.filter((def) => {
     const defCore = extractCoreMeaning(def);
     // Filter out if core meanings are the same or one is subset of the other
     if (!mainCore || !defCore) return true;
@@ -332,10 +405,10 @@ export function WordTooltip({
     // Check if all words in the shorter one are in the longer one
     const smaller = mainWords.size <= defWords.size ? mainWords : defWords;
     const larger = mainWords.size > defWords.size ? mainWords : defWords;
-    const isSubset = [...smaller].every(w => larger.has(w));
+    const isSubset = [...smaller].every((w) => larger.has(w));
     return !isSubset;
   });
-  
+
   const hasSecondaryDefinitions = secondaryDefinitions.length > 0;
 
   return (
@@ -351,7 +424,7 @@ export function WordTooltip({
       {/* Main content */}
       {!isLoadingDict && dictionaryResult && (
         <div className="pb-4 md:pb-0">
-          {/* Header: Article + Word + POS + Save */}
+          {/* Header: Article + Word + POS + Bookmark + Save */}
           <div className="flex items-start justify-between gap-2 mb-1">
             <div className="flex items-center gap-2 flex-wrap min-w-0">
               {/* Article with gender color */}
@@ -359,8 +432,8 @@ export function WordTooltip({
                 <span
                   className={cn(
                     "text-sm font-bold px-2 py-0.5 rounded border",
-                    genderStyle 
-                      ? `${genderStyle.bg} ${genderStyle.text} ${genderStyle.border}` 
+                    genderStyle
+                      ? `${genderStyle.bg} ${genderStyle.text} ${genderStyle.border}`
                       : "bg-gray-100 text-gray-700 border-gray-300"
                   )}
                 >
@@ -377,11 +450,42 @@ export function WordTooltip({
               )}
               {/* Gender indicator dot (if no article shown) */}
               {!article && genderStyle && (
-                <span className={cn("w-2 h-2 rounded-full", genderStyle.dot)} title={gender || ""} />
+                <span
+                  className={cn("w-2 h-2 rounded-full", genderStyle.dot)}
+                  title={gender || ""}
+                />
               )}
             </div>
 
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Reading position bookmark - icon only */}
+              {wordIndex !== undefined && onSetBookmark && (
+                <button
+                  onClick={() => {
+                    if (isBookmarked && onRemoveBookmark) {
+                      onRemoveBookmark();
+                    } else {
+                      onSetBookmark(wordIndex);
+                    }
+                  }}
+                  className={cn(
+                    "flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200",
+                    isBookmarked
+                      ? "bg-amber-50 text-amber-600 hover:bg-amber-100"
+                      : "text-[#b5b5b5] hover:text-[#c45c3e] hover:bg-[#faf5f0]"
+                  )}
+                  title={isBookmarked ? "Remove reading bookmark" : "Bookmark this position"}
+                >
+                  <Bookmark
+                    className={cn(
+                      "h-4 w-4 transition-transform duration-200",
+                      isBookmarked && "fill-current"
+                    )}
+                  />
+                </button>
+              )}
+
+              {/* Save to vocabulary */}
               <button
                 onClick={() => handleSaveWord(!aiAnalysis)}
                 disabled={isSaved || isSaving}
@@ -429,7 +533,7 @@ export function WordTooltip({
                   ))}
                 </div>
               )}
-              
+
               {/* Main definition with optional truncation */}
               <p className="text-[#3a3a3a] text-[15px] leading-relaxed">
                 {displayDefinition}
@@ -444,30 +548,34 @@ export function WordTooltip({
               </p>
 
               {/* Form/inflection note - with Wiktionary link for base word */}
-              {inflectionNote && (() => {
-                const parsed = parseInflectionNote(inflectionNote);
-                if (parsed) {
+              {inflectionNote &&
+                (() => {
+                  const parsed = parseInflectionNote(inflectionNote);
+                  if (parsed) {
+                    return (
+                      <p className="text-[13px] text-[#7a7a7a] italic">
+                        {parsed.prefix}
+                        <a
+                          href={getWiktionaryUrl(
+                            parsed.baseWord,
+                            targetLanguage
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#c45c3e] underline underline-offset-2 hover:text-[#b35537] inline-flex items-center gap-0.5"
+                        >
+                          {parsed.baseWord}
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </p>
+                    );
+                  }
                   return (
                     <p className="text-[13px] text-[#7a7a7a] italic">
-                      {parsed.prefix}
-                      <a
-                        href={getWiktionaryUrl(parsed.baseWord, targetLanguage)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#c45c3e] underline underline-offset-2 hover:text-[#b35537] inline-flex items-center gap-0.5"
-                      >
-                        {parsed.baseWord}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
+                      {inflectionNote}
                     </p>
                   );
-                }
-                return (
-                  <p className="text-[13px] text-[#7a7a7a] italic">
-                    {inflectionNote}
-                  </p>
-                );
-              })()}
+                })()}
 
               {/* Additional definitions */}
               {hasSecondaryDefinitions && (
@@ -475,7 +583,10 @@ export function WordTooltip({
                   {showAllDefinitions && (
                     <div className="mt-1.5 space-y-1">
                       {secondaryDefinitions.map((def, i) => (
-                        <p key={i} className="text-[#5a5a5a] text-sm leading-relaxed pl-3 border-l-2 border-[#e5e5e5]">
+                        <p
+                          key={i}
+                          className="text-[#5a5a5a] text-sm leading-relaxed pl-3 border-l-2 border-[#e5e5e5]"
+                        >
                           {def}
                         </p>
                       ))}
@@ -485,8 +596,15 @@ export function WordTooltip({
                     onClick={() => setShowAllDefinitions(!showAllDefinitions)}
                     className="text-xs text-[#8a8a8a] hover:text-[#c45c3e] mt-1 flex items-center gap-0.5"
                   >
-                    <ChevronDown className={cn("h-3 w-3 transition-transform", showAllDefinitions && "rotate-180")} />
-                    {showAllDefinitions ? "Less" : `+${secondaryDefinitions.length} more`}
+                    <ChevronDown
+                      className={cn(
+                        "h-3 w-3 transition-transform",
+                        showAllDefinitions && "rotate-180"
+                      )}
+                    />
+                    {showAllDefinitions
+                      ? "Less"
+                      : `+${secondaryDefinitions.length} more`}
                   </button>
                 </>
               )}
@@ -507,7 +625,12 @@ export function WordTooltip({
                 onClick={() => setShowForms(!showForms)}
                 className="text-xs text-[#7a7a7a] hover:text-[#c45c3e] flex items-center gap-1"
               >
-                <ChevronDown className={cn("h-3 w-3 transition-transform", showForms && "rotate-180")} />
+                <ChevronDown
+                  className={cn(
+                    "h-3 w-3 transition-transform",
+                    showForms && "rotate-180"
+                  )}
+                />
                 Forms
               </button>
               {showForms && (
@@ -527,7 +650,9 @@ export function WordTooltip({
           {explanation && (
             <div className="flex items-start gap-1.5 bg-[#faf8f5] rounded-md p-2 mb-2 border border-[#f0ebe3]">
               <Sparkles className="h-3 w-3 text-[#c45c3e] mt-0.5 shrink-0" />
-              <p className="text-xs text-[#4a4a4a] leading-relaxed">{explanation}</p>
+              <p className="text-xs text-[#4a4a4a] leading-relaxed">
+                {explanation}
+              </p>
             </div>
           )}
 
@@ -542,7 +667,7 @@ export function WordTooltip({
               Wiktionary
               <ExternalLink className="h-3 w-3" />
             </a>
-            
+
             {!aiAnalysis && (
               <button
                 onClick={handleAnalyzeWithAI}
@@ -561,7 +686,9 @@ export function WordTooltip({
                 ) : (
                   <>
                     <Sparkles className="h-3 w-3" />
-                    <span>{dictionaryResult.found ? "More details" : "AI lookup"}</span>
+                    <span>
+                      {dictionaryResult.found ? "More details" : "AI lookup"}
+                    </span>
                   </>
                 )}
               </button>

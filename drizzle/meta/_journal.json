@@ -50,6 +50,13 @@
       "when": 1768481191624,
       "tag": "0006_safe_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1768500294662,
+      "tag": "0007_friendly_living_tribunal",
+      "breakpoints": true
     }
   ]
 }

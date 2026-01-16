@@ -48,11 +48,11 @@ export async function POST(request: Request) {
     let newMasteryLevel = word.masteryLevel;
 
     if (rating === 0) {
-      // Again - reset to 0
+      // Again - reset to 0, review in 1 day
       newMasteryLevel = 0;
     } else if (rating === 1) {
-      // Hard - stay at current level
-      newMasteryLevel = Math.max(0, word.masteryLevel);
+      // Hard - decrease by 1, review sooner
+      newMasteryLevel = Math.max(0, word.masteryLevel - 1);
     } else if (rating === 2) {
       // Good - increase by 1
       newMasteryLevel = Math.min(5, word.masteryLevel + 1);

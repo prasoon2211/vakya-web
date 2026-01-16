@@ -27,9 +27,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/use-toast";
-import { TranslatedText } from "@/components/article/translated-text";
+import { TranslatedText, TranslatedTextRef } from "@/components/article/translated-text";
 import { AudioPlayer } from "@/components/article/audio-player";
 import { ReadingMode } from "@/components/article/reading-mode";
+import { BookmarkControl } from "@/components/article/bookmark-control";
 import { extractDomain } from "@/lib/utils";
 import type { Article } from "@/lib/db/schema";
 import type { WordTimestamp } from "@/lib/audio/align-timestamps";
@@ -54,8 +55,10 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const [showReadingMode, setShowReadingMode] = useState(false);
   const [initialReadingWordIndex, setInitialReadingWordIndex] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [bookmarkWordIndex, setBookmarkWordIndex] = useState<number | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const onboardingCheckedRef = useRef(false);
+  const translatedTextRef = useRef<TranslatedTextRef>(null);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -84,6 +87,9 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           setBlocks([]);
         }
       }
+
+      // Set bookmark from article data
+      setBookmarkWordIndex(data.bookmarkWordIndex ?? null);
 
       // If translation is in progress, start polling
       if (data.status === "fetching" || data.status === "translating") {
@@ -335,6 +341,20 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
 
   const handleOpenReadingMode = () => {
     if (!audioTimestamps || audioTimestamps.length === 0) {
+      setShowReadingMode(true);
+      return;
+    }
+
+    // If there's a bookmark, use it directly as the word index
+    if (bookmarkWordIndex !== null && bookmarkWordIndex > 0) {
+      // The bookmark word index should map roughly to timestamp index
+      // Scale based on total words in article vs timestamps
+      const totalWords = blocks.reduce((sum, b) => {
+        return sum + b.translated.split(/\s+/).filter(w => w.trim()).length;
+      }, 0);
+      const ratio = bookmarkWordIndex / Math.max(1, totalWords);
+      const timestampIndex = Math.floor(ratio * audioTimestamps.length);
+      setInitialReadingWordIndex(Math.min(timestampIndex, audioTimestamps.length - 1));
       setShowReadingMode(true);
       return;
     }
@@ -619,10 +639,13 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
         {/* Content */}
         {hasContent ? (
           <TranslatedText
+            ref={translatedTextRef}
             blocks={blocks}
             targetLanguage={article.targetLanguage}
             articleId={article.id}
             hasAudioPlayer={!!signedAudioUrl}
+            bookmarkWordIndex={bookmarkWordIndex}
+            onBookmarkChange={setBookmarkWordIndex}
           />
         ) : (
           <div className="text-center py-12">
@@ -630,6 +653,16 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           </div>
         )}
       </article>
+
+      {/* Bookmark Control - only show when translation is complete and has content */}
+      {article.status === "completed" && hasContent && (
+        <BookmarkControl
+          articleId={article.id}
+          bookmarkWordIndex={bookmarkWordIndex}
+          onBookmarkChange={setBookmarkWordIndex}
+          hasAudioPlayer={!!signedAudioUrl}
+        />
+      )}
 
       {/* Audio Player / Generate Button - only show when translation is complete */}
       {article.status === "completed" && (

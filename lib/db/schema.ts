@@ -47,6 +47,8 @@ export const articles = pgTable(
     errorMessage: text("error_message"), // User-friendly error message
     errorCode: text("error_code"), // Machine-readable error code
     retryCount: integer("retry_count").default(0).notNull(),
+    // Reading position (word index for precise bookmarking)
+    bookmarkWordIndex: integer("bookmark_word_index"), // Word index within translated content
     // Audio
     audioUrl: text("audio_url"),
     audioDurationSeconds: integer("audio_duration_seconds"),

@@ -9,6 +9,7 @@ import {
   Loader2,
   ChevronRight,
   X,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,9 +30,16 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { toast } from "@/components/ui/use-toast";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useIsMobile } from "@/lib/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 import type { SavedWord } from "@/lib/db/schema";
+import { AddWordModal } from "@/components/vocabulary/add-word-modal";
 
 export default function VocabularyPage() {
   const isMobile = useIsMobile();
@@ -47,6 +55,37 @@ export default function VocabularyPage() {
   const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [showAddWordModal, setShowAddWordModal] = useState(false);
+  const [targetLanguage, setTargetLanguage] = useState("German");
+
+  // Fetch user settings for target language
+  useEffect(() => {
+    async function fetchSettings() {
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.targetLanguage) setTargetLanguage(data.targetLanguage);
+        }
+      } catch {
+        // Use default
+      }
+    }
+    fetchSettings();
+  }, []);
+
+  // Keyboard shortcut: Ctrl+K (Windows/Linux) or Cmd+K (Mac) to open Add Word modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setShowAddWordModal(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     fetchWords();
@@ -278,10 +317,25 @@ export default function VocabularyPage() {
             </p>
           </div>
         </div>
-        <Button onClick={startReview}>
-          <RotateCcw className="h-4 w-4 mr-2" />
-          Start Review
-        </Button>
+        <div className="flex items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" onClick={() => setShowAddWordModal(true)}>
+                  <Plus className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Add Word</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Add word manually <kbd className="ml-1.5 px-1.5 py-0.5 text-xs bg-[#f3ede4] rounded">Ctrl+K</kbd></p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <Button onClick={startReview}>
+            <RotateCcw className="h-4 w-4 mr-2" />
+            Start Review
+          </Button>
+        </div>
       </div>
 
       {/* Search & Filter */}
@@ -580,6 +634,14 @@ export default function VocabularyPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add Word Modal */}
+      <AddWordModal
+        open={showAddWordModal}
+        onOpenChange={setShowAddWordModal}
+        targetLanguage={targetLanguage}
+        onWordAdded={fetchWords}
+      />
     </div>
   );
 }
