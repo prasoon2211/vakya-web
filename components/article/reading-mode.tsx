@@ -47,6 +47,247 @@ interface BridgeSentence {
   text: string;
   charStart: number;
   charEnd: number;
+  // Pre-extracted content words for matching (lowercase)
+  contentWords: Set<string>;
+}
+
+// Common English words to skip when matching (articles, prepositions, etc.)
+const COMMON_ENGLISH_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+  'may', 'might', 'must', 'shall', 'can', 'need', 'to', 'of', 'in', 'for',
+  'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during', 'before',
+  'after', 'above', 'below', 'between', 'under', 'again', 'then', 'once', 'here',
+  'there', 'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more', 'most',
+  'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so',
+  'than', 'too', 'very', 'just', 'and', 'but', 'if', 'or', 'because', 'until',
+  'while', 'although', 'this', 'that', 'these', 'those', 'it', 'its', 'he', 'she',
+  'they', 'them', 'his', 'her', 'their', 'my', 'your', 'our', 'who', 'which',
+  'what', 'whom', 'also', 'about', 'over', 'out', 'up', 'down', 'off', 'any',
+]);
+
+// Extract content words from English text (for bridge sentences)
+function extractContentWords(text: string): Set<string> {
+  const words = text.toLowerCase().split(/[\s,.!?;:'"()\[\]{}]+/);
+  const contentWords = new Set<string>();
+  for (const word of words) {
+    // Keep words that are: 3+ chars, not common, and alphanumeric
+    if (word.length >= 3 && !COMMON_ENGLISH_WORDS.has(word) && /^[a-z0-9]+$/i.test(word)) {
+      contentWords.add(word);
+    }
+    // Always keep numbers (universal anchors)
+    if (/^\d+$/.test(word)) {
+      contentWords.add(word);
+    }
+  }
+  return contentWords;
+}
+
+// Extract signal words from translated text (nouns, numbers, long words)
+function extractSignalWords(sentence: string, targetLanguage: string): string[] {
+  const words = sentence.split(/[\s,.!?;:'"()\[\]{}]+/).filter(w => w.length > 0);
+  const signals: string[] = [];
+
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, '');
+    if (!cleanWord || cleanWord.length < 2) continue;
+
+    // Numbers are universal anchors (always include)
+    if (/\d/.test(cleanWord)) {
+      signals.push(cleanWord);
+      continue;
+    }
+
+    // For German: capitalized words (not at sentence start) are nouns
+    if (targetLanguage.toLowerCase().includes('german')) {
+      if (i > 0 && /^[A-ZÄÖÜ]/.test(word)) {
+        signals.push(word);
+        continue;
+      }
+    }
+
+    // For other languages: long words are likely content words
+    if (cleanWord.length >= 5) {
+      signals.push(word);
+    }
+  }
+
+  // Limit to top 5 signal words to keep API calls reasonable
+  return signals.slice(0, 5);
+}
+
+// Translated sentence parsed from timestamps
+interface TranslatedSentence {
+  text: string;
+  startWordIndex: number;
+  endWordIndex: number; // inclusive
+}
+
+// Parse timestamps into sentences
+function parseTranslatedSentences(timestamps: WordTimestamp[]): TranslatedSentence[] {
+  if (timestamps.length === 0) return [];
+
+  const sentences: TranslatedSentence[] = [];
+  let sentenceStart = 0;
+  let sentenceWords: string[] = [];
+
+  for (let i = 0; i < timestamps.length; i++) {
+    sentenceWords.push(timestamps[i].word);
+
+    if (isSentenceEnd(timestamps[i].word) || i === timestamps.length - 1) {
+      sentences.push({
+        text: sentenceWords.join(' '),
+        startWordIndex: sentenceStart,
+        endWordIndex: i,
+      });
+      sentenceStart = i + 1;
+      sentenceWords = [];
+    }
+  }
+
+  return sentences;
+}
+
+// Find which translated sentence contains the given word index
+function findTranslatedSentenceIndex(
+  sentences: TranslatedSentence[],
+  wordIndex: number
+): number {
+  for (let i = 0; i < sentences.length; i++) {
+    if (wordIndex >= sentences[i].startWordIndex && wordIndex <= sentences[i].endWordIndex) {
+      return i;
+    }
+  }
+  return sentences.length - 1;
+}
+
+// Sentence alignment result
+interface SentenceAlignment {
+  translatedSentenceIdx: number;
+  bridgeSentenceIdx: number;
+  confidence: number; // 0-1, how confident we are in this alignment
+}
+
+// Look up a word translation via API
+async function lookupTranslation(
+  word: string,
+  targetLanguage: string
+): Promise<string | null> {
+  try {
+    const params = new URLSearchParams({
+      word: word,
+      language: targetLanguage,
+    });
+    const res = await fetch(`/api/word/lookup?${params}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.found && data.translation) {
+      // Extract first word/phrase from translation (often contains extra info)
+      // e.g., "house, dwelling" -> "house"
+      const firstWord = data.translation.split(/[,;()]/)[0].trim().toLowerCase();
+      // Get just the first word if it's a phrase
+      return firstWord.split(/\s+/)[0] || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Score how well a bridge sentence matches translated signal words
+function scoreBridgeSentence(
+  bridgeSentence: BridgeSentence,
+  translatedWords: string[]
+): number {
+  if (translatedWords.length === 0) return 0;
+
+  let matches = 0;
+  for (const word of translatedWords) {
+    const lowerWord = word.toLowerCase();
+    if (bridgeSentence.contentWords.has(lowerWord)) {
+      matches++;
+    }
+  }
+
+  return matches / translatedWords.length;
+}
+
+// Find the best matching bridge sentence for a translated sentence
+async function findBestBridgeSentence(
+  translatedSentence: TranslatedSentence,
+  bridgeSentences: BridgeSentence[],
+  expectedBridgeIdx: number,
+  targetLanguage: string
+): Promise<SentenceAlignment> {
+  // Extract signal words from the translated sentence
+  const signalWords = extractSignalWords(translatedSentence.text, targetLanguage);
+
+  if (signalWords.length === 0 || bridgeSentences.length === 0) {
+    // No signal words, fall back to position-based
+    return {
+      translatedSentenceIdx: -1, // Will be set by caller
+      bridgeSentenceIdx: expectedBridgeIdx,
+      confidence: 0,
+    };
+  }
+
+  // Separate numbers (universal anchors) from words needing translation
+  const numbersInSignal: string[] = [];
+  const wordsToTranslate: string[] = [];
+
+  for (const word of signalWords) {
+    const numberMatch = word.match(/\d+/);
+    if (numberMatch) {
+      numbersInSignal.push(numberMatch[0]);
+    } else {
+      wordsToTranslate.push(word);
+    }
+  }
+
+  // Look up translations for non-number signal words (in parallel)
+  const translationPromises = wordsToTranslate.map(word => lookupTranslation(word, targetLanguage));
+  const translations = await Promise.all(translationPromises);
+
+  // Combine successful translations with numbers
+  const englishWords = [
+    ...translations.filter((t): t is string => t !== null),
+    ...numbersInSignal,
+  ];
+
+  if (englishWords.length === 0) {
+    // No translations found, fall back to position-based
+    return {
+      translatedSentenceIdx: -1,
+      bridgeSentenceIdx: expectedBridgeIdx,
+      confidence: 0,
+    };
+  }
+
+  // Score candidate bridge sentences (±3 around expected position)
+  const windowSize = 3;
+  let bestIdx = expectedBridgeIdx;
+  let bestScore = 0; // Start at 0, not -1, so we only override if we find actual matches
+
+  for (
+    let i = Math.max(0, expectedBridgeIdx - windowSize);
+    i <= Math.min(bridgeSentences.length - 1, expectedBridgeIdx + windowSize);
+    i++
+  ) {
+    const score = scoreBridgeSentence(bridgeSentences[i], englishWords);
+    // Only update if this candidate scores BETTER (not equal)
+    // This ensures we stick with expectedBridgeIdx if all score 0
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+
+  return {
+    translatedSentenceIdx: -1, // Will be set by caller
+    bridgeSentenceIdx: bestIdx,
+    confidence: bestScore,
+  };
 }
 
 function parseBridgeSentences(text: string): BridgeSentence[] {
@@ -64,6 +305,7 @@ function parseBridgeSentences(text: string): BridgeSentence[] {
         text: sentenceText,
         charStart: match.index,
         charEnd: match.index + match[0].length,
+        contentWords: extractContentWords(sentenceText),
       });
     }
     lastEnd = match.index + match[0].length;
@@ -77,6 +319,7 @@ function parseBridgeSentences(text: string): BridgeSentence[] {
         text: remaining,
         charStart: lastEnd,
         charEnd: text.length,
+        contentWords: extractContentWords(remaining),
       });
     }
   }
@@ -89,7 +332,8 @@ function findCenterSentence(
   bridgeSentences: BridgeSentence[],
   fullBridgeText: string,
   currentWordIndex: number,
-  totalTranslatedWords: number
+  totalTranslatedWords: number,
+  debug: boolean = false
 ): number {
   if (bridgeSentences.length === 0 || totalTranslatedWords === 0) return 0;
 
@@ -103,23 +347,18 @@ function findCenterSentence(
   for (let i = 0; i < bridgeSentences.length; i++) {
     const sentence = bridgeSentences[i];
     if (targetCharPos >= sentence.charStart && targetCharPos < sentence.charEnd) {
+      if (debug) {
+        // Show snippet of the sentence we found
+        const snippet = sentence.text.substring(0, 50);
+        console.log(
+          `[Bridge] word=${currentWordIndex}/${totalTranslatedWords} (${(readingPercent * 100).toFixed(1)}%) → ` +
+          `char=${targetCharPos}/${bridgeLength} → sentence=${i}: "${snippet}..."`
+        );
+      }
       return i;
     }
   }
   return bridgeSentences.length - 1;
-}
-
-// Build display text from a stable window of sentences
-function buildBridgeContextFromWindow(
-  bridgeSentences: BridgeSentence[],
-  windowStart: number,
-  windowSize: number
-): string {
-  const endIdx = Math.min(windowStart + windowSize, bridgeSentences.length);
-  return bridgeSentences
-    .slice(windowStart, endIdx)
-    .map(s => s.text)
-    .join(" ");
 }
 
 export function ReadingMode({
@@ -153,7 +392,7 @@ export function ReadingMode({
 
   // Stable window state - only shifts when center approaches edge
   const WINDOW_SIZE = 6; // Number of sentences to show
-  const BUFFER = 1; // How close to edge before shifting
+  const SENTENCES_BEFORE = 1; // How many sentences to show BEFORE the center
   const [windowStartIdx, setWindowStartIdx] = useState(0);
 
   // Combine all bridge text from blocks
@@ -173,11 +412,119 @@ export function ReadingMode({
     return parseBridgeSentences(fullBridgeText);
   }, [fullBridgeText]);
 
-  // Calculate current center sentence (changes frequently, but doesn't cause text rebuild)
+  // Parse translated text into sentences (for alignment)
+  const translatedSentences = useMemo(() => {
+    return parseTranslatedSentences(timestamps);
+  }, [timestamps]);
+
+  // Track which translated sentence we're currently in
+  const currentTranslatedSentenceIdx = useMemo(() => {
+    if (translatedSentences.length === 0) return 0;
+    return findTranslatedSentenceIndex(translatedSentences, currentWordIndex);
+  }, [translatedSentences, currentWordIndex]);
+
+  // Alignment cache: translatedSentenceIdx -> bridgeSentenceIdx
+  const alignmentCacheRef = useRef<Map<number, SentenceAlignment>>(new Map());
+  // Track which alignments are currently being computed
+  const pendingAlignmentsRef = useRef<Set<number>>(new Set());
+  // Counter to force re-render when alignment cache updates
+  const [alignmentVersion, setAlignmentVersion] = useState(0);
+
+  // Compute alignment for a translated sentence
+  const computeAlignment = useCallback(async (translatedSentenceIdx: number) => {
+    // Skip if already cached or being computed
+    if (
+      alignmentCacheRef.current.has(translatedSentenceIdx) ||
+      pendingAlignmentsRef.current.has(translatedSentenceIdx) ||
+      !hasBridge ||
+      bridgeSentences.length === 0 ||
+      translatedSentenceIdx >= translatedSentences.length
+    ) {
+      return;
+    }
+
+    pendingAlignmentsRef.current.add(translatedSentenceIdx);
+
+    try {
+      const translatedSentence = translatedSentences[translatedSentenceIdx];
+
+      // Calculate expected bridge index using position ratio (fallback)
+      const ratio = translatedSentenceIdx / Math.max(1, translatedSentences.length - 1);
+      const expectedBridgeIdx = Math.min(
+        Math.floor(ratio * bridgeSentences.length),
+        bridgeSentences.length - 1
+      );
+
+      // Find best matching bridge sentence
+      const alignment = await findBestBridgeSentence(
+        translatedSentence,
+        bridgeSentences,
+        expectedBridgeIdx,
+        targetLanguage
+      );
+
+      alignment.translatedSentenceIdx = translatedSentenceIdx;
+
+      // Cache the result
+      alignmentCacheRef.current.set(translatedSentenceIdx, alignment);
+
+      // Trigger re-render so centerSentenceIdx picks up the new alignment
+      setAlignmentVersion(v => v + 1);
+
+      // Log only when alignment differs from expected (adjustment made)
+      if (alignment.confidence >= 0.3 && alignment.bridgeSentenceIdx !== expectedBridgeIdx) {
+        console.log(
+          `[Alignment] Adjusted: sentence ${translatedSentenceIdx} → bridge ${alignment.bridgeSentenceIdx} ` +
+          `(was ${expectedBridgeIdx}, confidence: ${(alignment.confidence * 100).toFixed(0)}%)`
+        );
+      }
+    } catch (error) {
+      console.error('[Alignment] Error computing alignment:', error);
+    } finally {
+      pendingAlignmentsRef.current.delete(translatedSentenceIdx);
+    }
+  }, [hasBridge, bridgeSentences, translatedSentences, targetLanguage]);
+
+  // Pre-compute alignments for current and upcoming sentences
+  useEffect(() => {
+    if (!hasBridge || !showBridgeContext || translatedSentences.length === 0) return;
+
+    // Compute current sentence alignment immediately
+    computeAlignment(currentTranslatedSentenceIdx);
+
+    // Pre-compute next 2 sentences with delays (cleanup on sentence change)
+    const timeoutIds: NodeJS.Timeout[] = [];
+    for (let i = 1; i <= 2; i++) {
+      const nextIdx = currentTranslatedSentenceIdx + i;
+      if (nextIdx < translatedSentences.length) {
+        // Slight delay for pre-computation to prioritize current sentence
+        const timeoutId = setTimeout(() => computeAlignment(nextIdx), i * 150);
+        timeoutIds.push(timeoutId);
+      }
+    }
+
+    // Cleanup timeouts if sentence changes before they fire
+    return () => {
+      timeoutIds.forEach(id => clearTimeout(id));
+    };
+  }, [currentTranslatedSentenceIdx, hasBridge, showBridgeContext, translatedSentences.length, computeAlignment]);
+
+  // Calculate current center sentence - using alignment if available, otherwise fallback to position
   const centerSentenceIdx = useMemo(() => {
     if (!hasBridge || bridgeSentences.length === 0) return 0;
-    return findCenterSentence(bridgeSentences, fullBridgeText, currentWordIndex, timestamps.length);
-  }, [hasBridge, bridgeSentences, fullBridgeText, currentWordIndex, timestamps.length]);
+
+    // Check if we have a confident alignment for the current translated sentence
+    // Require at least 30% confidence (e.g., 2/5 words matched) to override position-based guess
+    const alignment = alignmentCacheRef.current.get(currentTranslatedSentenceIdx);
+    if (alignment && alignment.confidence >= 0.3) {
+      // Use aligned bridge sentence
+      return alignment.bridgeSentenceIdx;
+    }
+
+    // Fallback: use position-based calculation
+    return findCenterSentence(bridgeSentences, fullBridgeText, currentWordIndex, timestamps.length, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBridge, bridgeSentences, fullBridgeText, currentWordIndex, timestamps.length, currentTranslatedSentenceIdx, alignmentVersion]);
 
   // Toggle bridge context and persist
   const toggleBridgeContext = useCallback(() => {
@@ -191,43 +538,59 @@ export function ReadingMode({
   }, []);
 
   // Update window position only when center approaches edge (hysteresis)
-  // This keeps the display stable for several sentences of reading
+  // Goal: Keep center sentence near the TOP of the window (after SENTENCES_BEFORE sentences)
+  // This shows what you're reading NOW, plus upcoming content
   useEffect(() => {
     if (!hasBridge || bridgeSentences.length === 0) return;
 
     const windowEndIdx = windowStartIdx + WINDOW_SIZE - 1;
 
+    // Ideal position for center sentence within the window
+    const idealCenterPosition = SENTENCES_BEFORE; // position 1 (second sentence shown)
+
+    // Current position of center within the window
+    const currentCenterPosition = centerSentenceIdx - windowStartIdx;
+
     let newWindowStart = windowStartIdx;
 
-    // If center is near/past the end of visible window, shift forward
-    if (centerSentenceIdx > windowEndIdx - BUFFER) {
-      // Shift so center is near the start of the new window
-      newWindowStart = Math.max(0, centerSentenceIdx - BUFFER);
+    // If center is past the end of visible window, shift forward
+    if (centerSentenceIdx > windowEndIdx) {
+      // Position window so center is at ideal position (near top)
+      newWindowStart = Math.max(0, centerSentenceIdx - idealCenterPosition);
     }
-    // If center is near/before the start of visible window, shift backward
-    else if (centerSentenceIdx < windowStartIdx + BUFFER) {
-      // Shift so center is near the end of the new window
-      newWindowStart = Math.max(0, centerSentenceIdx - WINDOW_SIZE + BUFFER + 1);
+    // If center is before the start of visible window, shift backward
+    else if (centerSentenceIdx < windowStartIdx) {
+      // Position window so center is at ideal position
+      newWindowStart = Math.max(0, centerSentenceIdx - idealCenterPosition);
+    }
+    // If center is getting close to the end, preemptively shift
+    else if (currentCenterPosition > WINDOW_SIZE - 2) {
+      newWindowStart = Math.max(0, centerSentenceIdx - idealCenterPosition);
     }
 
     // Clamp to valid range
-    newWindowStart = Math.max(0, Math.min(newWindowStart, bridgeSentences.length - WINDOW_SIZE));
+    const maxStart = Math.max(0, bridgeSentences.length - WINDOW_SIZE);
+    newWindowStart = Math.max(0, Math.min(newWindowStart, maxStart));
 
     if (newWindowStart !== windowStartIdx) {
       setWindowStartIdx(newWindowStart);
-      console.log(
-        `[Bridge] Window shift: center=${centerSentenceIdx}, ` +
-        `old=[${windowStartIdx}-${windowStartIdx + WINDOW_SIZE - 1}], ` +
-        `new=[${newWindowStart}-${newWindowStart + WINDOW_SIZE - 1}]`
-      );
     }
   }, [centerSentenceIdx, windowStartIdx, hasBridge, bridgeSentences.length]);
 
-  // Build display text from stable window (only changes when windowStartIdx changes)
-  const displayedBridgeText = useMemo(() => {
-    if (!hasBridge || bridgeSentences.length === 0) return "";
-    return buildBridgeContextFromWindow(bridgeSentences, windowStartIdx, WINDOW_SIZE);
+  // Build array of sentences for display (enables individual highlighting)
+  const displayedSentences = useMemo(() => {
+    if (!hasBridge || bridgeSentences.length === 0) return [];
+    const endIdx = Math.min(windowStartIdx + WINDOW_SIZE, bridgeSentences.length);
+    return bridgeSentences.slice(windowStartIdx, endIdx).map(s => s.text);
   }, [hasBridge, bridgeSentences, windowStartIdx]);
+
+  // Calculate which sentence in the window should be highlighted
+  const highlightIdx = useMemo(() => {
+    if (displayedSentences.length === 0) return -1;
+    const idx = centerSentenceIdx - windowStartIdx;
+    // Clamp to valid range
+    return Math.max(0, Math.min(idx, displayedSentences.length - 1));
+  }, [centerSentenceIdx, windowStartIdx, displayedSentences.length]);
 
   // Update current word based on audio time (only during playback)
   // When manually navigating via goToWord, we set currentWordIndex directly
@@ -505,8 +868,22 @@ export function ReadingMode({
             )}
           >
             <div className="px-4 pb-3">
-              <p className="text-sm text-[#4a4a4a] leading-relaxed transition-opacity duration-200">
-                {displayedBridgeText || "..."}
+              <p className="text-sm text-[#4a4a4a] leading-relaxed">
+                {displayedSentences.length > 0 ? (
+                  displayedSentences.map((sentence, i) => (
+                    <span
+                      key={`${windowStartIdx}-${i}`}
+                      className={cn(
+                        "transition-colors duration-300",
+                        i === highlightIdx && "bg-amber-100/50 rounded px-0.5 -mx-0.5"
+                      )}
+                    >
+                      {sentence}{" "}
+                    </span>
+                  ))
+                ) : (
+                  "..."
+                )}
               </p>
             </div>
           </div>
