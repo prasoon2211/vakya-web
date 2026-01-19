@@ -57,6 +57,13 @@
       "when": 1768550520716,
       "tag": "0007_lyrical_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1768823913639,
+      "tag": "0008_exotic_khan",
+      "breakpoints": true
     }
   ]
 }

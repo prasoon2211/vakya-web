@@ -52,6 +52,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
   const [signedAudioUrl, setSignedAudioUrl] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [audioTimestamps, setAudioTimestamps] = useState<WordTimestamp[] | null>(null);
+  const [bridgeSentenceMap, setBridgeSentenceMap] = useState<number[] | null>(null);
   const [showReadingMode, setShowReadingMode] = useState(false);
   const [initialReadingWordIndex, setInitialReadingWordIndex] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -193,6 +194,9 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
       if (res.ok) {
         const data = await res.json();
         setAudioTimestamps(data.timestamps);
+        if (data.bridgeSentenceMap) {
+          setBridgeSentenceMap(data.bridgeSentenceMap);
+        }
       }
     } catch (error) {
       console.error("Failed to fetch timestamps:", error);
@@ -712,6 +716,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           onClose={() => setShowReadingMode(false)}
           initialWordIndex={initialReadingWordIndex}
           blocks={blocks}
+          bridgeSentenceMap={bridgeSentenceMap}
         />
       )}
 

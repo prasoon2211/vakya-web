@@ -1,0 +1,1 @@
+ALTER TABLE "articles" ADD COLUMN "bridge_sentence_map" text;

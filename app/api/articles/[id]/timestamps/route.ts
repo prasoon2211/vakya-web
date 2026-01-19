@@ -27,12 +27,13 @@ export async function GET(
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Get article with timestamps
+    // Get article with timestamps and bridge mapping
     const article = await db.query.articles.findFirst({
       where: and(eq(articles.id, id), eq(articles.userId, user.id)),
       columns: {
         audioTimestamps: true,
         audioUrl: true,
+        bridgeSentenceMap: true,
       },
     });
 
@@ -65,7 +66,17 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ timestamps });
+    // Parse bridge sentence map if available
+    let bridgeSentenceMap: number[] | null = null;
+    if (article.bridgeSentenceMap) {
+      try {
+        bridgeSentenceMap = JSON.parse(article.bridgeSentenceMap);
+      } catch {
+        // Ignore parsing errors for bridge map
+      }
+    }
+
+    return NextResponse.json({ timestamps, bridgeSentenceMap });
   } catch (error) {
     console.error("Error getting timestamps:", error);
     return NextResponse.json(

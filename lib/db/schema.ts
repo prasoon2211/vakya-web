@@ -53,6 +53,7 @@ export const articles = pgTable(
     audioUrl: text("audio_url"),
     audioDurationSeconds: integer("audio_duration_seconds"),
     audioTimestamps: text("audio_timestamps"), // JSON: WordTimestamp[] for reading mode sync
+    bridgeSentenceMap: text("bridge_sentence_map"), // JSON: number[] mapping translated sentence idx to bridge sentence idx
     wordCount: integer("word_count"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

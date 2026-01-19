@@ -6,7 +6,8 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { db, users, articles } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
-import { alignWordsToOriginal, WhisperWord } from "@/lib/audio/align-timestamps";
+import { alignWordsToOriginal, WhisperWord, WordTimestamp } from "@/lib/audio/align-timestamps";
+import { computeBridgeSentenceMap } from "@/lib/audio/bridge-mapping";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -24,6 +25,7 @@ const s3Client = new S3Client({
 interface TranslationBlock {
   original: string;
   translated: string;
+  bridge?: string;
 }
 
 // Language-specific TTS instructions for natural pronunciation
@@ -214,13 +216,36 @@ export async function POST(
     const wordCount = translatedText.split(/\s+/).length;
     const estimatedDuration = Math.round((wordCount / 150) * 60);
 
-    // Update article with audio key and timestamps
+    // Compute bridge sentence mapping if we have timestamps and bridge text
+    let bridgeSentenceMap: string | null = null;
+    if (audioTimestamps) {
+      try {
+        const timestamps: WordTimestamp[] = JSON.parse(audioTimestamps);
+        const bridgeText = blocks
+          .map((block) => block.bridge || "")
+          .filter(Boolean)
+          .join(" ");
+
+        if (bridgeText) {
+          const mapping = computeBridgeSentenceMap(timestamps, bridgeText, article.targetLanguage);
+          if (mapping.length > 0) {
+            bridgeSentenceMap = JSON.stringify(mapping);
+            console.log(`[Audio] Computed bridge mapping for ${mapping.length} sentences`);
+          }
+        }
+      } catch (mappingError) {
+        console.error("[Audio] Bridge mapping computation failed:", mappingError);
+      }
+    }
+
+    // Update article with audio key, timestamps, and bridge mapping
     await db
       .update(articles)
       .set({
         audioUrl: audioKey,
         audioDurationSeconds: estimatedDuration,
         audioTimestamps,
+        bridgeSentenceMap,
       })
       .where(eq(articles.id, id));
 
