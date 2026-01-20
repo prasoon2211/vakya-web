@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth, verifyToken } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { parseHTML } from "linkedom";
@@ -19,6 +19,36 @@ import {
   badRequest,
 } from "@/lib/api-error-handler";
 import { withTimeout } from "@/lib/utils/async";
+
+// ============================================================================
+// Auth Helper for Extension Support
+// ============================================================================
+
+/**
+ * Get user ID from either Clerk session (cookie) or Bearer token (extension)
+ */
+async function getUserId(request: Request): Promise<string | null> {
+  // First try standard Clerk auth (cookie-based)
+  const { userId } = await auth();
+  if (userId) return userId;
+
+  // Fall back to Bearer token (from Chrome extension)
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    try {
+      const verified = await verifyToken(token, {
+        secretKey: process.env.CLERK_SECRET_KEY!,
+      });
+      return verified.sub; // sub contains the user ID
+    } catch (error) {
+      console.error("Bearer token verification failed:", error);
+      return null;
+    }
+  }
+
+  return null;
+}
 
 // Lazy-init Gemini client
 let geminiClient: GoogleGenAI | null = null;
@@ -831,7 +861,8 @@ async function processTextTranslation(
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await auth();
+    // Support both cookie auth (web) and Bearer token auth (extension)
+    const userId = await getUserId(request);
     if (!userId) {
       return unauthorized();
     }

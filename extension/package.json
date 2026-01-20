@@ -1,0 +1,38 @@
+{
+  "name": "vakya-web-clipper",
+  "displayName": "Vakya Web Clipper",
+  "version": "1.0.0",
+  "description": "Clip articles from any webpage and send them to Vakya for translation and learning",
+  "author": "Vakya",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
+  },
+  "dependencies": {
+    "@clerk/chrome-extension": "^2.0.0",
+    "defuddle": "^1.7.6",
+    "plasmo": "^0.90.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.10.10",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.7.3"
+  },
+  "manifest": {
+    "host_permissions": [
+      "https://*/*",
+      "http://*/*"
+    ],
+    "permissions": [
+      "activeTab",
+      "storage",
+      "cookies"
+    ],
+    "key": "$CRX_PUBLIC_KEY"
+  }
+}

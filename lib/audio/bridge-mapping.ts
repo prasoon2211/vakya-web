@@ -88,6 +88,17 @@ function getFillerWords(language: string): Set<string> {
   return new Set();
 }
 
+// Heuristic constants (tuneable)
+const GLOBAL_ANCHOR_SCORE = 2.5;
+const GLOBAL_ANCHOR_DISTINCTNESS = 1.4;
+const LOCAL_ANCHOR_SCORE = 1.5;
+const SHORT_SENTENCE_MAX_WORDS = 3;
+const SHORT_SENTENCE_MATCH_RATIO = 0.8;
+const BASE_SEARCH_RADIUS_FRACTION = 0.15;
+const MIN_SEARCH_RADIUS = 10;
+const INTERPOLATION_TOLERANCE_MAX = 3;
+const INTERPOLATION_TOLERANCE_FRACTION = 0.15;
+
 interface TranslatedSentence {
   text: string;
   startWordIndex: number;
@@ -186,14 +197,20 @@ function extractEnglishContentWords(text: string): Set<string> {
   return contentWords;
 }
 
+interface ExtractedWords {
+  englishWords: string[];  // Dictionary-translated words
+  sourceWords: string[];   // Original content words (for cognate matching)
+}
+
 // Extract content words from translated sentence and translate them to English
 function extractAndTranslateContentWords(
   sentence: string,
   targetLanguage: string,
   fillerWords: Set<string>
-): string[] {
+): ExtractedWords {
   const words = sentence.split(/[\s,.!?;:'"()\[\]{}–—-]+/).filter(w => w.length > 0);
   const englishWords: string[] = [];
+  const sourceWords: string[] = [];
 
   // Check if dictionary is available for this language
   const supportedLang = isSupportedLanguage(targetLanguage) ? targetLanguage as SupportedLanguage : null;
@@ -206,16 +223,23 @@ function extractAndTranslateContentWords(
     const numberMatch = cleanWord.match(/\d+/);
     if (numberMatch) {
       englishWords.push(numberMatch[0]);
+      sourceWords.push(numberMatch[0]);
       continue;
     }
 
     // Skip filler words
     if (fillerWords.has(cleanWord.toLowerCase())) continue;
 
+    // Keep source word for cognate matching (if long enough)
+    if (cleanWord.length >= 4) {
+      sourceWords.push(cleanWord);
+    }
+
     // Try to translate using dictionary
     if (supportedLang) {
       try {
-        const entry = lookupWord(word, supportedLang);
+        // Use cleanWord for lookup (without punctuation)
+        const entry = lookupWord(cleanWord, supportedLang);
         if (entry && entry.definition) {
           // Extract first word/phrase from definition
           // e.g., "house, dwelling" -> "house"
@@ -231,28 +255,149 @@ function extractAndTranslateContentWords(
     }
   }
 
-  return englishWords;
+  return { englishWords, sourceWords };
+}
+
+// Check if two words are cognates (similar spelling across languages)
+function areCognates(word1: string, word2: string): boolean {
+  const w1 = word1.toLowerCase();
+  const w2 = word2.toLowerCase();
+
+  // Exact match
+  if (w1 === w2) return true;
+
+  // Too different in length
+  if (Math.abs(w1.length - w2.length) > 3) return false;
+
+  // Both must be at least 4 chars for cognate matching
+  if (w1.length < 4 || w2.length < 4) return false;
+
+  // Calculate Levenshtein distance
+  const matrix: number[][] = [];
+  for (let i = 0; i <= w1.length; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= w2.length; j++) {
+    matrix[0][j] = j;
+  }
+  for (let i = 1; i <= w1.length; i++) {
+    for (let j = 1; j <= w2.length; j++) {
+      const cost = w1[i - 1] === w2[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  const distance = matrix[w1.length][w2.length];
+  const maxLen = Math.max(w1.length, w2.length);
+
+  // Heuristic adjustments
+  const startMatch = w1[0] === w2[0];
+
+  // Standard threshold
+  let threshold = 0.2;
+  if (maxLen >= 8) threshold = 0.25;
+
+  // Relaxed threshold for short words (4-6 chars) if they start with the same letter
+  // e.g. "Haus" vs "House" (dist 2, len 5, ratio 0.4) -> Should match
+  if (startMatch && maxLen >= 4 && maxLen <= 6) {
+    if (distance <= 2 && distance / maxLen <= 0.41) return true;
+  }
+
+  return distance / maxLen <= threshold;
 }
 
 // Score how well a bridge sentence matches translated words
 function scoreBridgeSentence(
   bridgeSentence: BridgeSentence,
-  translatedWords: string[]
+  translatedWords: string[],
+  sourceWords: string[] = []  // Original German words for cognate matching
 ): number {
-  if (translatedWords.length === 0) return 0;
+  if (translatedWords.length === 0 && sourceWords.length === 0) return 0;
 
   let matches = 0;
+  const bridgeWordsArray = Array.from(bridgeSentence.contentWords);
+  const matchedBridgeWords = new Set<string>();  // Track what we've already matched
+
+  // Check dictionary-translated words first (higher confidence)
   for (const word of translatedWords) {
-    if (bridgeSentence.contentWords.has(word.toLowerCase())) {
+    const lowerWord = word.toLowerCase();
+    if (bridgeSentence.contentWords.has(lowerWord)) {
       matches++;
+      matchedBridgeWords.add(lowerWord);  // Mark as matched
+    }
+  }
+
+  // Check cognates from source words, but skip if bridge word already matched via dictionary
+  for (const sourceWord of sourceWords) {
+    for (const bridgeWord of bridgeWordsArray) {
+      // Skip if this bridge word was already matched via dictionary
+      if (matchedBridgeWords.has(bridgeWord)) continue;
+
+      if (areCognates(sourceWord, bridgeWord)) {
+        matches += 0.8;
+        matchedBridgeWords.add(bridgeWord);  // Mark as matched
+        break;
+      }
     }
   }
 
   return matches;
 }
 
+// Weighted increasing subsequence helper (by bIdx) returning indices
+function weightedIncreasingSubsequence<T extends { bIdx: number; score: number }>(
+  items: T[]
+): number[] {
+  const n = items.length;
+  if (n === 0) return [];
+
+  const dp: number[] = new Array(n).fill(0);
+  const parent: number[] = new Array(n).fill(-1);
+
+  for (let i = 0; i < n; i++) {
+    dp[i] = items[i].score;
+    for (let j = 0; j < i; j++) {
+      if (items[j].bIdx < items[i].bIdx) {
+        const newScore = dp[j] + items[i].score;
+        if (newScore > dp[i]) {
+          dp[i] = newScore;
+          parent[i] = j;
+        }
+      }
+    }
+  }
+
+  let bestEnd = -1;
+  let bestTotal = 0;
+  for (let i = 0; i < n; i++) {
+    if (dp[i] > bestTotal) {
+      bestTotal = dp[i];
+      bestEnd = i;
+    }
+  }
+
+  const selected: number[] = [];
+  let curr = bestEnd;
+  while (curr !== -1) {
+    selected.push(curr);
+    curr = parent[curr];
+  }
+  return selected.reverse();
+}
+
 /**
  * Compute the bridge sentence mapping for an article.
+ *
+ * Algorithm: Anchor-based alignment with interpolation
+ * 1. Find Global Anchors (unambiguous matches across full text)
+ * 2. Define Piecewise Search Zones based on Global Anchors
+ * 3. Find Best Local Matches within zones
+ * 4. Apply Weighted LIS to enforce monotonicity
+ * 5. Interpolate gaps
  *
  * @param timestamps - Word timestamps from audio transcription
  * @param bridgeText - Full bridge (English) text
@@ -273,65 +418,268 @@ export function computeBridgeSentenceMap(
   }
 
   const fillerWords = getFillerWords(targetLanguage);
-  const mapping: number[] = [];
-  let lastMatchedIdx = 0;
+  const numTranslated = translatedSentences.length;
+  const numBridge = bridgeSentences.length;
 
-  console.log(`[BridgeMapping] Computing mapping for ${translatedSentences.length} translated sentences → ${bridgeSentences.length} bridge sentences`);
+  console.log(`[BridgeMapping] Computing mapping for ${numTranslated} translated → ${numBridge} bridge sentences`);
 
-  for (let tIdx = 0; tIdx < translatedSentences.length; tIdx++) {
-    const translatedSentence = translatedSentences[tIdx];
+  // Pre-calculate extracted words for all translated sentences to avoid re-work
+  const extractedTranslated = translatedSentences.map(s => 
+    extractAndTranslateContentWords(s.text, targetLanguage, fillerWords)
+  );
 
-    // Extract content words and translate to English
-    const englishWords = extractAndTranslateContentWords(
-      translatedSentence.text,
-      targetLanguage,
-      fillerWords
-    );
+  // --- Step 1: Global Anchor Search ---
+  // Find "Islands of Certainty" to fix the drift problem.
+  // We look for sentences that match uniquely and strongly anywhere in the document.
+  
+  interface AnchorPoint { tIdx: number; bIdx: number; score: number }
+  const globalAnchors: AnchorPoint[] = [];
 
-    // Calculate expected position based on ratio
-    const expectedIdx = Math.floor((tIdx / translatedSentences.length) * bridgeSentences.length);
+  // Only run global search if documents are large enough to drift
+  if (numTranslated > 5 && numBridge > 5) {
+    // Sample for long documents to keep runtime reasonable
+    const sampleStep = numTranslated > 50 ? 3 : 1;
 
-    // If no content words could be translated, use position-based mapping
-    if (englishWords.length === 0) {
-      const fallbackIdx = Math.max(lastMatchedIdx, Math.min(expectedIdx, bridgeSentences.length - 1));
-      mapping.push(fallbackIdx);
-      lastMatchedIdx = fallbackIdx;
-      continue;
+    for (let tIdx = 0; tIdx < numTranslated; tIdx += sampleStep) {
+      const { englishWords, sourceWords } = extractedTranslated[tIdx];
+      
+      // Skip sentences with too little information to be unique
+      if (englishWords.length + sourceWords.length < 2) continue;
+
+      let bestB = -1;
+      let bestS = 0;
+      let secondBestS = 0;
+
+      // Full scan of bridge sentences
+      for (let bIdx = 0; bIdx < numBridge; bIdx++) {
+        const score = scoreBridgeSentence(bridgeSentences[bIdx], englishWords, sourceWords);
+        if (score > bestS) {
+          secondBestS = bestS;
+          bestS = score;
+          bestB = bIdx;
+        } else if (score > secondBestS) {
+          secondBestS = score;
+        }
+      }
+
+      // Global Anchor Criteria:
+      // 1. Strong match (>= threshold)
+      // 2. Distinct (Best is significantly better than second best)
+      if (
+        bestB !== -1 &&
+        bestS >= GLOBAL_ANCHOR_SCORE &&
+        (secondBestS === 0 || bestS / secondBestS >= GLOBAL_ANCHOR_DISTINCTNESS)
+      ) {
+        globalAnchors.push({ tIdx, bIdx: bestB, score: bestS });
+      }
+    }
+  }
+
+  // Filter global anchors to ensure they are monotonic using weighted LIS
+  const cleanGlobalAnchors: AnchorPoint[] = [];
+  if (globalAnchors.length > 0) {
+    const selected = weightedIncreasingSubsequence(globalAnchors);
+    for (const idx of selected) {
+      cleanGlobalAnchors.push(globalAnchors[idx]);
+    }
+  }
+  
+  // Add virtual start/end anchors for interpolation
+  const guideAnchors = [
+    { tIdx: 0, bIdx: 0 },
+    ...cleanGlobalAnchors.filter(a => a.tIdx > 0 && a.tIdx < numTranslated - 1),
+    { tIdx: numTranslated - 1, bIdx: numBridge - 1 }
+  ];
+
+  console.log(`[BridgeMapping] Global Anchors found: ${cleanGlobalAnchors.length}`);
+
+
+  // --- Step 2: Local Search with Adaptive Window ---
+  
+  interface SentenceMatch {
+    bestIdx: number;
+    bestScore: number;
+    englishWords: string[];
+    sourceWords: string[];
+  }
+
+  const matches: SentenceMatch[] = [];
+
+  for (let tIdx = 0; tIdx < numTranslated; tIdx++) {
+    const { englishWords, sourceWords } = extractedTranslated[tIdx];
+
+    // Determine expected position based on Piecewise Linear Interpolation of Guide Anchors
+    let prevAnchor = guideAnchors[0];
+    let nextAnchor = guideAnchors[guideAnchors.length - 1];
+    
+    // Find the bounding anchors
+    for (let i = 0; i < guideAnchors.length - 1; i++) {
+      if (tIdx >= guideAnchors[i].tIdx && tIdx <= guideAnchors[i+1].tIdx) {
+        prevAnchor = guideAnchors[i];
+        nextAnchor = guideAnchors[i+1];
+        break;
+      }
     }
 
-    // Search for best matching bridge sentence
-    // Start from lastMatchedIdx (enforce monotonicity) but also check around expected position
-    const searchStart = lastMatchedIdx;
-    const searchEnd = Math.min(bridgeSentences.length - 1, Math.max(expectedIdx + 3, lastMatchedIdx + 5));
+    // Interpolate expected index
+    let expectedIdx: number;
+    if (nextAnchor.tIdx === prevAnchor.tIdx) {
+      expectedIdx = prevAnchor.bIdx;
+    } else {
+      const progress = (tIdx - prevAnchor.tIdx) / (nextAnchor.tIdx - prevAnchor.tIdx);
+      expectedIdx = prevAnchor.bIdx + Math.round(progress * (nextAnchor.bIdx - prevAnchor.bIdx));
+    }
 
-    let bestIdx = Math.max(lastMatchedIdx, expectedIdx);
+    // Adaptive Search Radius
+    // Use a wider radius if we are far from anchors, but constrain it generally
+    const baseRadius = Math.max(MIN_SEARCH_RADIUS, Math.ceil(numBridge * BASE_SEARCH_RADIUS_FRACTION));
+    const searchStart = Math.max(0, expectedIdx - baseRadius);
+    const searchEnd = Math.min(numBridge - 1, expectedIdx + baseRadius);
+
+    let bestIdx = expectedIdx;
     let bestScore = 0;
 
     for (let bIdx = searchStart; bIdx <= searchEnd; bIdx++) {
-      const score = scoreBridgeSentence(bridgeSentences[bIdx], englishWords);
+      const score = scoreBridgeSentence(bridgeSentences[bIdx], englishWords, sourceWords);
       if (score > bestScore) {
         bestScore = score;
         bestIdx = bIdx;
       }
     }
 
-    // If no matches found, use position-based guess (but respect monotonicity)
-    if (bestScore === 0) {
-      bestIdx = Math.max(lastMatchedIdx, Math.min(expectedIdx, bridgeSentences.length - 1));
-    }
+    matches.push({ bestIdx, bestScore, englishWords, sourceWords });
+  }
 
-    mapping.push(bestIdx);
-    lastMatchedIdx = bestIdx;
+  // Step 3: Identify anchor candidates (high-confidence matches) for LIS
+  // An anchor must have score >= threshold OR be a strong short-sentence match
+  const anchorCandidates: { tIdx: number; bIdx: number; score: number }[] = [];
 
-    // Log significant mappings for debugging
-    if (bestScore > 0 && bestIdx !== expectedIdx) {
-      console.log(
-        `[BridgeMapping] Sentence ${tIdx} → Bridge ${bestIdx} (expected ${expectedIdx}, matched ${bestScore}/${englishWords.length} words)`
-      );
+  for (let tIdx = 0; tIdx < numTranslated; tIdx++) {
+    const match = matches[tIdx];
+    
+    // Adaptive Threshold:
+    // 1. Standard high score
+    // 2. Or near-perfect match for short sentences based on dictionary words
+    const totalDictWords = match.englishWords.length;
+    const isPerfectShort =
+      totalDictWords > 0 &&
+      totalDictWords <= SHORT_SENTENCE_MAX_WORDS &&
+      match.bestScore >= totalDictWords * SHORT_SENTENCE_MATCH_RATIO;
+
+    if (match.bestScore >= LOCAL_ANCHOR_SCORE || isPerfectShort) {
+      anchorCandidates.push({ tIdx, bIdx: match.bestIdx, score: match.bestScore });
     }
   }
 
-  console.log(`[BridgeMapping] Completed mapping: ${mapping.join(', ')}`);
+  // Add first/last as soft anchors (lower priority, will be used if compatible)
+  // Only force them if they don't conflict with strong matches
+  const firstMatch = matches[0];
+  const lastMatch = matches[numTranslated - 1];
+
+  // Step 4: Find best monotonic subsequence using weighted LIS
+  // Weight = score, prioritize sequences with higher total score
+  anchorCandidates.sort((a, b) => a.tIdx - b.tIdx);
+
+  const selectedIndices = weightedIncreasingSubsequence(anchorCandidates);
+
+  // Build valid anchors from selected indices
+  const validAnchors: { tIdx: number; bIdx: number }[] = [];
+
+  // Add first sentence anchor if it fits
+  if (selectedIndices.length === 0 || anchorCandidates[selectedIndices[0]].tIdx > 0) {
+    // Check if first sentence has a reasonable match, otherwise use 0→0
+    if (firstMatch.bestScore >= 1 && firstMatch.bestIdx < (selectedIndices.length > 0 ? anchorCandidates[selectedIndices[0]].bIdx : numBridge - 1)) {
+      validAnchors.push({ tIdx: 0, bIdx: firstMatch.bestIdx });
+    } else {
+      validAnchors.push({ tIdx: 0, bIdx: 0 });
+    }
+  }
+
+  // Add selected high-confidence anchors
+  for (const idx of selectedIndices) {
+    const anchor = anchorCandidates[idx];
+    // Ensure monotonicity with what we've added
+    if (validAnchors.length === 0 || anchor.bIdx > validAnchors[validAnchors.length - 1].bIdx) {
+      validAnchors.push({ tIdx: anchor.tIdx, bIdx: anchor.bIdx });
+    }
+  }
+
+  // Add last sentence anchor if it fits
+  const lastValidBIdx = validAnchors.length > 0 ? validAnchors[validAnchors.length - 1].bIdx : -1;
+  if (validAnchors.length === 0 || validAnchors[validAnchors.length - 1].tIdx < numTranslated - 1) {
+    if (lastMatch.bestScore >= 1 && lastMatch.bestIdx > lastValidBIdx) {
+      validAnchors.push({ tIdx: numTranslated - 1, bIdx: lastMatch.bestIdx });
+    } else if (numBridge - 1 > lastValidBIdx) {
+      validAnchors.push({ tIdx: numTranslated - 1, bIdx: numBridge - 1 });
+    }
+  }
+
+  // Fallback: if no anchors at all, use simple position-based endpoints
+  if (validAnchors.length === 0) {
+    validAnchors.push({ tIdx: 0, bIdx: 0 });
+    validAnchors.push({ tIdx: numTranslated - 1, bIdx: numBridge - 1 });
+  }
+
+  console.log(`[BridgeMapping] Found ${validAnchors.length} anchors (from ${anchorCandidates.length} candidates): ${validAnchors.map(a => `${a.tIdx}→${a.bIdx}`).join(', ')}`);
+
+  // Step 5: Interpolate between anchors
+  const mapping: number[] = new Array(numTranslated);
+
+  for (let i = 0; i < validAnchors.length - 1; i++) {
+    const startAnchor = validAnchors[i];
+    const endAnchor = validAnchors[i + 1];
+
+    const tRange = endAnchor.tIdx - startAnchor.tIdx;
+    const bRange = endAnchor.bIdx - startAnchor.bIdx;
+
+    for (let tIdx = startAnchor.tIdx; tIdx <= endAnchor.tIdx; tIdx++) {
+      if (tIdx === startAnchor.tIdx) {
+        mapping[tIdx] = startAnchor.bIdx;
+      } else if (tIdx === endAnchor.tIdx) {
+        mapping[tIdx] = endAnchor.bIdx;
+      } else {
+        // Linear interpolation
+        const progress = (tIdx - startAnchor.tIdx) / tRange;
+        const interpolatedIdx = startAnchor.bIdx + Math.round(progress * bRange);
+
+        // But prefer a good content match if available nearby
+        // Use tighter tolerance: max 3 sentences or 15% of range, whichever is smaller
+        const match = matches[tIdx];
+        if (match.bestScore >= 1) {
+          const maxTolerance = Math.min(
+            INTERPOLATION_TOLERANCE_MAX,
+            Math.max(1, Math.ceil(bRange * INTERPOLATION_TOLERANCE_FRACTION))
+          );
+          const interpolationDiff = Math.abs(match.bestIdx - interpolatedIdx);
+          if (interpolationDiff <= maxTolerance) {
+            mapping[tIdx] = match.bestIdx;
+            continue;
+          }
+        }
+
+        mapping[tIdx] = interpolatedIdx;
+      }
+    }
+  }
+
+  // Handle any remaining sentences (shouldn't happen with proper anchors)
+  for (let tIdx = 0; tIdx < numTranslated; tIdx++) {
+    if (mapping[tIdx] === undefined) {
+      const expectedIdx = Math.floor((tIdx / numTranslated) * numBridge);
+      mapping[tIdx] = Math.min(expectedIdx, numBridge - 1);
+    }
+  }
+
+  // Step 6: Smooth out any remaining jumps
+  // If a sentence jumps backward significantly, smooth it
+  for (let tIdx = 1; tIdx < numTranslated; tIdx++) {
+    if (mapping[tIdx] < mapping[tIdx - 1] - 1) {
+      // This sentence goes backwards too much - use previous or interpolate
+      mapping[tIdx] = mapping[tIdx - 1];
+    }
+  }
+
+  console.log(`[BridgeMapping] Final mapping: ${mapping.join(', ')}`);
 
   return mapping;
 }

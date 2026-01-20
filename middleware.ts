@@ -8,8 +8,15 @@ const isPublicRoute = createRouteMatcher([
   "/not-authorized",
 ]);
 
+// Routes that handle their own auth (e.g., support Bearer token from extension)
+const isSelfAuthRoute = createRouteMatcher([
+  "/api/translate",
+]);
+
 export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
+  // Skip middleware auth for public routes and self-auth routes
+  // Self-auth routes handle their own authentication (e.g., Bearer token from extension)
+  if (!isPublicRoute(request) && !isSelfAuthRoute(request)) {
     await auth.protect();
   }
 });
