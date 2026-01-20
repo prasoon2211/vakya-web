@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReadingModeText } from "./reading-mode-text";
 import { findWordAtTime, WordTimestamp } from "@/lib/audio/align-timestamps";
+import { splitIntoSentences, isSentenceEndWord } from "@/lib/audio/sentence-utils";
 import { cn } from "@/lib/utils";
 
 interface TranslationBlock {
@@ -28,58 +29,38 @@ interface ReadingModeProps {
 const PLAYBACK_SPEEDS = [0.75, 1, 1.25];
 const BRIDGE_CONTEXT_KEY = "vakya-bridge-context-enabled";
 
-// Helper to detect sentence boundaries
-function isSentenceEnd(word: string): boolean {
-  return word.endsWith(".") || word.endsWith("!") || word.endsWith("?");
-}
-
 // Find the start of the sentence containing the given word index
 function findSentenceStart(timestamps: WordTimestamp[], wordIndex: number): number {
   let idx = wordIndex;
   // Go backwards until we find a sentence end (or reach the beginning)
-  while (idx > 0 && !isSentenceEnd(timestamps[idx - 1]?.word || "")) {
+  while (idx > 0) {
+    const prevWord = timestamps[idx - 1]?.word || "";
+    const currentWord = timestamps[idx]?.word || "";
+    if (isSentenceEndWord(prevWord, currentWord)) {
+      break;
+    }
     idx--;
   }
   return idx;
 }
 
-// Parse bridge text into sentences
+// Parse bridge text into sentences using robust sentence splitting
 interface BridgeSentence {
   text: string;
 }
 
 function parseBridgeSentences(text: string): BridgeSentence[] {
   if (!text.trim()) return [];
-
-  const sentences: BridgeSentence[] = [];
-  const regex = /[^.!?]*[.!?]+/g;
-  let match;
-  let lastEnd = 0;
-
-  while ((match = regex.exec(text)) !== null) {
-    const sentenceText = match[0].trim();
-    if (sentenceText) {
-      sentences.push({ text: sentenceText });
-    }
-    lastEnd = match.index + match[0].length;
-  }
-
-  // Handle remaining text without sentence-ending punctuation
-  if (lastEnd < text.length) {
-    const remaining = text.slice(lastEnd).trim();
-    if (remaining) {
-      sentences.push({ text: remaining });
-    }
-  }
-
-  return sentences;
+  return splitIntoSentences(text).map(text => ({ text }));
 }
 
 // Find which translated sentence contains the given word index
 function findCurrentTranslatedSentence(timestamps: WordTimestamp[], wordIndex: number): number {
   let sentenceIdx = 0;
   for (let i = 0; i < wordIndex && i < timestamps.length; i++) {
-    if (isSentenceEnd(timestamps[i].word)) {
+    const word = timestamps[i].word;
+    const nextWord = i < timestamps.length - 1 ? timestamps[i + 1].word : undefined;
+    if (isSentenceEndWord(word, nextWord)) {
       sentenceIdx++;
     }
   }
@@ -155,7 +136,11 @@ export function ReadingMode({
 
     // Fallback: use position-based calculation
     const totalTranslatedSentences = bridgeSentenceMap?.length ||
-      timestamps.filter((_, i) => i === timestamps.length - 1 || isSentenceEnd(timestamps[i].word)).length;
+      timestamps.filter((_, i) => {
+        if (i === timestamps.length - 1) return true;
+        const nextWord = i < timestamps.length - 1 ? timestamps[i + 1].word : undefined;
+        return isSentenceEndWord(timestamps[i].word, nextWord);
+      }).length;
 
     if (totalTranslatedSentences === 0) return 0;
 
@@ -293,31 +278,43 @@ export function ReadingMode({
     }
   }, [currentWordIndex, timestamps.length, goToWord]);
 
+  // Helper to check if word at index ends a sentence (for navigation)
+  const isWordSentenceEnd = useCallback((idx: number) => {
+    if (idx < 0 || idx >= timestamps.length) return false;
+    const word = timestamps[idx]?.word || "";
+    const nextWord = idx < timestamps.length - 1 ? timestamps[idx + 1]?.word : undefined;
+    return isSentenceEndWord(word, nextWord);
+  }, [timestamps]);
+
   const goToPreviousSentence = useCallback(() => {
     let idx = currentWordIndex;
 
-    if (idx > 0 && isSentenceEnd(timestamps[idx - 1]?.word || "")) {
+    // If we're at a sentence boundary, go back one word first
+    if (idx > 0 && isWordSentenceEnd(idx - 1)) {
       idx--;
     }
 
-    while (idx > 0 && !isSentenceEnd(timestamps[idx - 1]?.word || "")) {
+    // Go back to the start of current sentence
+    while (idx > 0 && !isWordSentenceEnd(idx - 1)) {
       idx--;
     }
 
+    // If we're not at the beginning, go to start of previous sentence
     if (idx > 0) {
       idx--;
-      while (idx > 0 && !isSentenceEnd(timestamps[idx - 1]?.word || "")) {
+      while (idx > 0 && !isWordSentenceEnd(idx - 1)) {
         idx--;
       }
     }
 
     goToWord(idx);
-  }, [currentWordIndex, timestamps, goToWord]);
+  }, [currentWordIndex, isWordSentenceEnd, goToWord]);
 
   const goToNextSentence = useCallback(() => {
     let idx = currentWordIndex;
 
-    while (idx < timestamps.length - 1 && !isSentenceEnd(timestamps[idx]?.word || "")) {
+    // Go to end of current sentence
+    while (idx < timestamps.length - 1 && !isWordSentenceEnd(idx)) {
       idx++;
     }
 

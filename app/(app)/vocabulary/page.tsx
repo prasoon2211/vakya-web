@@ -37,7 +37,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/lib/hooks/use-media-query";
-import { cn } from "@/lib/utils";
+import { cn, formatWordDisplay } from "@/lib/utils";
 import type { SavedWord } from "@/lib/db/schema";
 import { AddWordModal } from "@/components/vocabulary/add-word-modal";
 
@@ -227,7 +227,7 @@ export default function VocabularyPage() {
             {mastery.label}
           </Badge>
 
-          <h2 className="font-serif text-3xl font-bold text-[#1a1a1a] mb-2">{currentWord.word}</h2>
+          <h2 className="font-serif text-3xl font-bold text-[#1a1a1a] mb-2">{formatWordDisplay(currentWord.word, currentWord.targetLanguage, currentWord.partOfSpeech)}</h2>
           {currentWord.article && (
             <p className="text-lg text-[#c45c3e] mb-4">{currentWord.article}</p>
           )}
@@ -404,7 +404,7 @@ export default function VocabularyPage() {
                           {word.article}
                         </span>
                       )}
-                      <span className="font-semibold text-[#1a1a1a] truncate">{word.word}</span>
+                      <span className="font-semibold text-[#1a1a1a] truncate">{formatWordDisplay(word.word, word.targetLanguage, word.partOfSpeech)}</span>
                       {word.partOfSpeech && (
                         <Badge variant="outline" className="text-xs">
                           {word.partOfSpeech}
@@ -441,7 +441,7 @@ export default function VocabularyPage() {
                       <span className="text-[#c45c3e] text-xl font-medium">{selectedWord.article}</span>
                     )}
                     <h2 className="text-3xl font-semibold text-[#1a1a1a] tracking-tight">
-                      {selectedWord.word}
+                      {formatWordDisplay(selectedWord.word, selectedWord.targetLanguage, selectedWord.partOfSpeech)}
                     </h2>
                   </div>
 
@@ -537,7 +537,7 @@ export default function VocabularyPage() {
                   {selectedWord.article && (
                     <span className="text-[#c45c3e]">{selectedWord.article}</span>
                   )}
-                  {selectedWord.word}
+                  {formatWordDisplay(selectedWord.word, selectedWord.targetLanguage, selectedWord.partOfSpeech)}
                 </DialogTitle>
                 {selectedWord.partOfSpeech && (
                   <DialogDescription>{selectedWord.partOfSpeech}</DialogDescription>
@@ -617,7 +617,7 @@ export default function VocabularyPage() {
           <DialogHeader>
             <DialogTitle>Delete Word</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &ldquo;{selectedWord?.word}&rdquo;? This action cannot be undone.
+              Are you sure you want to delete &ldquo;{selectedWord ? formatWordDisplay(selectedWord.word, selectedWord.targetLanguage, selectedWord.partOfSpeech) : ""}&rdquo;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

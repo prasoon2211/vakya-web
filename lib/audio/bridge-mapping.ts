@@ -17,6 +17,7 @@
 
 import { lookupWord, isSupportedLanguage, type SupportedLanguage } from '@/lib/dictionary/lookup-sqlite';
 import { WordTimestamp } from './align-timestamps';
+import { splitIntoSentences, isSentenceEndWord, normalizeText } from './sentence-utils';
 
 // Common filler words to skip in both source and target languages
 const ENGLISH_FILLER_WORDS = new Set([
@@ -110,12 +111,7 @@ interface BridgeSentence {
   contentWords: Set<string>;
 }
 
-// Helper to detect sentence boundaries
-function isSentenceEnd(word: string): boolean {
-  return word.endsWith('.') || word.endsWith('!') || word.endsWith('?');
-}
-
-// Parse timestamps into sentences
+// Parse timestamps into sentences using robust sentence boundary detection
 function parseTranslatedSentences(timestamps: WordTimestamp[]): TranslatedSentence[] {
   if (timestamps.length === 0) return [];
 
@@ -124,11 +120,16 @@ function parseTranslatedSentences(timestamps: WordTimestamp[]): TranslatedSenten
   let sentenceWords: string[] = [];
 
   for (let i = 0; i < timestamps.length; i++) {
-    sentenceWords.push(timestamps[i].word);
+    const word = timestamps[i].word;
+    sentenceWords.push(word);
 
-    if (isSentenceEnd(timestamps[i].word) || i === timestamps.length - 1) {
+    // Get the next word for context (helps with abbreviation detection)
+    const nextWord = i < timestamps.length - 1 ? timestamps[i + 1].word : undefined;
+
+    // Use robust sentence end detection
+    if (isSentenceEndWord(word, nextWord) || i === timestamps.length - 1) {
       sentences.push({
-        text: sentenceWords.join(' '),
+        text: normalizeText(sentenceWords.join(' ')),
         startWordIndex: sentenceStart,
         endWordIndex: i,
       });
@@ -142,6 +143,19 @@ function parseTranslatedSentences(timestamps: WordTimestamp[]): TranslatedSenten
 
 // Parse bridge text into sentences with pre-extracted content words
 function parseBridgeSentences(text: string): BridgeSentence[] {
+  if (!text.trim()) return [];
+
+  // Use robust sentence splitting
+  const sentenceTexts = splitIntoSentences(text);
+
+  return sentenceTexts.map(sentenceText => ({
+    text: sentenceText,
+    contentWords: extractEnglishContentWords(sentenceText),
+  }));
+}
+
+// Legacy function kept for reference - now using splitIntoSentences
+function _parseBridgeSentencesLegacy(text: string): BridgeSentence[] {
   if (!text.trim()) return [];
 
   const sentences: BridgeSentence[] = [];
@@ -703,7 +717,9 @@ export function getBridgeSentenceForWord(
   let currentSentence = 0;
   for (let i = 0; i < timestamps.length; i++) {
     if (i === wordIndex) break;
-    if (isSentenceEnd(timestamps[i].word)) {
+    const word = timestamps[i].word;
+    const nextWord = i < timestamps.length - 1 ? timestamps[i + 1].word : undefined;
+    if (isSentenceEndWord(word, nextWord)) {
       currentSentence++;
     }
   }

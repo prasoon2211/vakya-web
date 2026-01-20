@@ -10,7 +10,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, formatWordDisplay } from "@/lib/utils";
 
 interface WordTooltipProps {
   word: string;
@@ -467,7 +467,7 @@ export function WordTooltip({
                 </span>
               )}
               {/* Word */}
-              <h2 className="text-xl font-semibold text-[#1a1a1a]">{word}</h2>
+              <h2 className="text-xl font-semibold text-[#1a1a1a]">{formatWordDisplay(word, targetLanguage, partOfSpeech)}</h2>
               {/* Part of speech badge */}
               {partOfSpeech && (
                 <span className="text-[10px] uppercase tracking-wide text-[#7a7a7a] bg-[#f0f0f0] px-1.5 py-0.5 rounded">
