@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { X, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Languages, ChevronDown, ChevronUp } from "lucide-react";
+import { X, Play, Pause, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Languages, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReadingModeText } from "./reading-mode-text";
@@ -24,6 +24,7 @@ interface ReadingModeProps {
   initialWordIndex?: number; // Start from this word (will snap to sentence start)
   blocks?: TranslationBlock[]; // Translation blocks with bridge text
   bridgeSentenceMap?: number[] | null; // Pre-computed mapping: translatedSentenceIdx -> bridgeSentenceIdx
+  onRegenerateMapping?: () => Promise<void>; // Callback to regenerate the bridge mapping
 }
 
 const PLAYBACK_SPEEDS = [0.75, 1, 1.25];
@@ -76,6 +77,7 @@ export function ReadingMode({
   initialWordIndex = 0,
   blocks = [],
   bridgeSentenceMap = null,
+  onRegenerateMapping,
 }: ReadingModeProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -88,6 +90,7 @@ export function ReadingMode({
   const startingWordIndex = findSentenceStart(timestamps, initialWordIndex);
   const [currentWordIndex, setCurrentWordIndex] = useState(startingWordIndex);
   const [wasPlayingBeforeTap, setWasPlayingBeforeTap] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   // Bridge context state
   const [showBridgeContext, setShowBridgeContext] = useState(() => {
@@ -158,6 +161,17 @@ export function ReadingMode({
       return newValue;
     });
   }, []);
+
+  // Handle regenerate mapping
+  const handleRegenerateMapping = useCallback(async () => {
+    if (!onRegenerateMapping || isRegenerating) return;
+    setIsRegenerating(true);
+    try {
+      await onRegenerateMapping();
+    } finally {
+      setIsRegenerating(false);
+    }
+  }, [onRegenerateMapping, isRegenerating]);
 
   // Build context display: mapped sentence in middle, ~20 words before/after
   const contextDisplay = useMemo(() => {
@@ -436,18 +450,43 @@ export function ReadingMode({
             <X className="h-5 w-5" />
           </button>
           <h2 className="text-[#1a1a1a] text-sm font-medium">Reading Mode</h2>
-          <button
-            onClick={cycleSpeed}
-            className={cn(
-              "px-2.5 py-1 text-sm font-medium rounded-full border transition-all",
-              playbackSpeed !== 1
-                ? "bg-[#c45c3e]/10 border-[#c45c3e]/30 text-[#c45c3e]"
-                : "bg-[#f3ede4] border-[#e8dfd3] text-[#6b6b6b] hover:border-[#d4c5b5]"
+          <div className="flex items-center gap-2">
+            {onRegenerateMapping && hasBridge && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={handleRegenerateMapping}
+                      disabled={isRegenerating}
+                      className={cn(
+                        "p-1.5 rounded-full border transition-all",
+                        isRegenerating
+                          ? "bg-[#f3ede4] border-[#e8dfd3] text-[#a0a0a0] cursor-not-allowed"
+                          : "bg-[#f3ede4] border-[#e8dfd3] text-[#6b6b6b] hover:border-[#d4c5b5] hover:text-[#1a1a1a]"
+                      )}
+                    >
+                      <RefreshCw className={cn("h-3.5 w-3.5", isRegenerating && "animate-spin")} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p className="text-xs">Regenerate English context mapping</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
-            title="Playback speed"
-          >
-            {playbackSpeed}x
-          </button>
+            <button
+              onClick={cycleSpeed}
+              className={cn(
+                "px-2.5 py-1 text-sm font-medium rounded-full border transition-all",
+                playbackSpeed !== 1
+                  ? "bg-[#c45c3e]/10 border-[#c45c3e]/30 text-[#c45c3e]"
+                  : "bg-[#f3ede4] border-[#e8dfd3] text-[#6b6b6b] hover:border-[#d4c5b5]"
+              )}
+              title="Playback speed"
+            >
+              {playbackSpeed}x
+            </button>
+          </div>
         </div>
 
       {/* Main content - word display */}

@@ -267,7 +267,7 @@ export async function POST(
           .join(" ");
 
         if (bridgeText) {
-          const mapping = computeBridgeSentenceMap(timestamps, bridgeText, article.targetLanguage);
+          const mapping = await computeBridgeSentenceMap(timestamps, bridgeText, article.targetLanguage);
           if (mapping.length > 0) {
             bridgeSentenceMap = JSON.stringify(mapping);
             console.log(`[Audio] Computed bridge mapping for ${mapping.length} sentences`);

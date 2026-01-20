@@ -203,6 +203,22 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
     }
   };
 
+  const handleRegenerateMapping = async () => {
+    try {
+      const res = await fetch(`/api/articles/${resolvedParams.id}/timestamps`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.bridgeSentenceMap) {
+          setBridgeSentenceMap(data.bridgeSentenceMap);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to regenerate mapping:", error);
+    }
+  };
+
   // Fetch timestamps when audio URL is available
   useEffect(() => {
     if (signedAudioUrl && !audioTimestamps) {
@@ -293,6 +309,10 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
 
   const handleGenerateAudio = async () => {
     setIsGeneratingAudio(true);
+    toast({
+      title: "Generating audio...",
+      description: "This may take a few minutes for longer articles",
+    });
     try {
       const res = await fetch(`/api/articles/${resolvedParams.id}/audio`, {
         method: "POST",
@@ -717,6 +737,7 @@ export default function ArticlePage({ params }: { params: Promise<{ id: string }
           initialWordIndex={initialReadingWordIndex}
           blocks={blocks}
           bridgeSentenceMap={bridgeSentenceMap}
+          onRegenerateMapping={handleRegenerateMapping}
         />
       )}
 

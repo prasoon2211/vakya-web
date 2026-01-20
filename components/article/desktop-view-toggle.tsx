@@ -89,19 +89,25 @@ export function DesktopViewToggle({
           {/* Toggle */}
           <div
             className={cn(
-              "relative inline-flex rounded-full p-1",
+              "relative grid rounded-full p-1",
               "bg-[#f0ebe4] border border-[#e8dfd3]",
               "transition-shadow duration-200",
               isKeyboardActive && "ring-2 ring-[#c45c3e]/30"
             )}
+            style={{
+              gridTemplateColumns: `repeat(${segments.length}, minmax(70px, 1fr))`,
+            }}
           >
             {/* Sliding indicator */}
             <motion.div
-              className="absolute top-1 bottom-1 rounded-full bg-white shadow-sm"
-              style={{ width: `calc(${100 / segments.length}% - 4px)` }}
+              className="absolute top-1 bottom-1 rounded-full bg-white shadow-sm pointer-events-none"
+              style={{
+                width: `calc(${100 / segments.length}% - 4px)`,
+                left: 4,
+              }}
               initial={false}
               animate={{
-                x: `calc(${currentIndex * 100}% + ${currentIndex * 4}px)`,
+                x: `calc(${currentIndex * 100}%)`,
               }}
               transition={{
                 type: "spring",
@@ -117,7 +123,7 @@ export function DesktopViewToggle({
                   <button
                     onClick={() => onModeChange(segment.id)}
                     className={cn(
-                      "relative z-10 px-4 py-1.5 rounded-full",
+                      "relative z-10 px-4 py-1.5 rounded-full text-center",
                       "text-sm font-medium",
                       "transition-colors duration-200",
                       "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c45c3e] focus-visible:ring-offset-2",

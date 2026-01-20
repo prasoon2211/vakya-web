@@ -18,8 +18,11 @@
 import { lookupWord, isSupportedLanguage, type SupportedLanguage } from '@/lib/dictionary/lookup-sqlite';
 import { WordTimestamp } from './align-timestamps';
 import { splitIntoSentences, isSentenceEndWord, normalizeText } from './sentence-utils';
+import OpenAI from 'openai';
 
 // Common filler words to skip in both source and target languages
+// Note: We deliberately keep speech verbs (says, said, say) as they can be useful anchors
+// for matching quoted speech patterns like '"...," says Samet'
 const ENGLISH_FILLER_WORDS = new Set([
   'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
   'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
@@ -32,7 +35,7 @@ const ENGLISH_FILLER_WORDS = new Set([
   'while', 'although', 'this', 'that', 'these', 'those', 'it', 'its', 'he', 'she',
   'they', 'them', 'his', 'her', 'their', 'my', 'your', 'our', 'who', 'which',
   'what', 'whom', 'also', 'about', 'over', 'out', 'up', 'down', 'off', 'any',
-  'been', 'being', 'both', 'into', 'most', 'much', 'now', 'said', 'says', 'say',
+  'been', 'being', 'both', 'into', 'most', 'much', 'now',
 ]);
 
 // German filler words (articles, prepositions, pronouns, auxiliaries)
@@ -99,6 +102,43 @@ const BASE_SEARCH_RADIUS_FRACTION = 0.15;
 const MIN_SEARCH_RADIUS = 10;
 const INTERPOLATION_TOLERANCE_MAX = 3;
 const INTERPOLATION_TOLERANCE_FRACTION = 0.15;
+const EMBEDDING_MODEL = 'text-embedding-3-small';
+const EMBEDDING_SCORE_THRESHOLD = 0.25;
+const EMBEDDING_MARGIN = 1.15;
+const EMBEDDING_WINDOW = 3; // candidates on each side of expected idx
+
+// Confidence thresholds for mapping quality
+const MIN_CONFIDENCE_SCORE = 0.5;  // Below this, mark as low confidence
+const PROPER_NOUN_WEIGHT = 2.0;    // Weight for proper noun exact matches
+const ACRONYM_WEIGHT = 2.5;        // Weight for acronym matches (USA, EU, etc.)
+
+function getOpenAIClient(): OpenAI | null {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  return new OpenAI({ apiKey });
+}
+
+// OpenAI embeddings are normalized to length 1, so dot product = cosine similarity
+function dotProduct(a: number[], b: number[]): number {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+  }
+  return dot;
+}
+
+async function embedTexts(client: OpenAI, texts: string[]): Promise<number[][]> {
+  // OpenAI recommends replacing newlines with spaces for better results
+  const cleanedTexts = texts.map(t => t.replace(/\n/g, ' '));
+  const res = await client.embeddings.create({
+    model: EMBEDDING_MODEL,
+    input: cleanedTexts,
+    // Use reduced dimensions for faster/cheaper comparisons while maintaining quality
+    // text-embedding-3-small can be shortened without losing much accuracy
+    dimensions: 512,
+  });
+  return res.data.map(d => d.embedding as number[]);
+}
 
 interface TranslatedSentence {
   text: string;
@@ -109,6 +149,8 @@ interface TranslatedSentence {
 interface BridgeSentence {
   text: string;
   contentWords: Set<string>;
+  properNouns: Set<string>;  // Capitalized names (case-preserved for matching)
+  acronyms: Set<string>;     // All-caps acronyms like USA, EU
 }
 
 // Parse timestamps into sentences using robust sentence boundary detection
@@ -148,10 +190,15 @@ function parseBridgeSentences(text: string): BridgeSentence[] {
   // Use robust sentence splitting
   const sentenceTexts = splitIntoSentences(text);
 
-  return sentenceTexts.map(sentenceText => ({
-    text: sentenceText,
-    contentWords: extractEnglishContentWords(sentenceText),
-  }));
+  return sentenceTexts.map(sentenceText => {
+    const extracted = extractEnglishContentWords(sentenceText);
+    return {
+      text: sentenceText,
+      contentWords: extracted.contentWords,
+      properNouns: extracted.properNouns,
+      acronyms: extracted.acronyms,
+    };
+  });
 }
 
 // Legacy function kept for reference - now using splitIntoSentences
@@ -166,9 +213,12 @@ function _parseBridgeSentencesLegacy(text: string): BridgeSentence[] {
   while ((match = regex.exec(text)) !== null) {
     const sentenceText = match[0].trim();
     if (sentenceText) {
+      const extracted = extractEnglishContentWords(sentenceText);
       sentences.push({
         text: sentenceText,
-        contentWords: extractEnglishContentWords(sentenceText),
+        contentWords: extracted.contentWords,
+        properNouns: extracted.properNouns,
+        acronyms: extracted.acronyms,
       });
     }
     lastEnd = match.index + match[0].length;
@@ -178,9 +228,12 @@ function _parseBridgeSentencesLegacy(text: string): BridgeSentence[] {
   if (lastEnd < text.length) {
     const remaining = text.slice(lastEnd).trim();
     if (remaining) {
+      const extracted = extractEnglishContentWords(remaining);
       sentences.push({
         text: remaining,
-        contentWords: extractEnglishContentWords(remaining),
+        contentWords: extracted.contentWords,
+        properNouns: extracted.properNouns,
+        acronyms: extracted.acronyms,
       });
     }
   }
@@ -189,17 +242,48 @@ function _parseBridgeSentencesLegacy(text: string): BridgeSentence[] {
 }
 
 // Extract content words from English text (bridge sentences)
-function extractEnglishContentWords(text: string): Set<string> {
-  const words = text.toLowerCase().split(/[\s,.!?;:'"()\[\]{}–—-]+/);
+interface ExtractedBridgeWords {
+  contentWords: Set<string>;
+  properNouns: Set<string>;
+  acronyms: Set<string>;
+}
+
+function extractEnglishContentWords(text: string): ExtractedBridgeWords {
+  const rawWords = text.split(/[\s,.!?;:'"()\[\]{}–—-]+/);
   const contentWords = new Set<string>();
+  const properNouns = new Set<string>();
+  const acronyms = new Set<string>();
 
-  for (const word of words) {
+  for (let i = 0; i < rawWords.length; i++) {
+    const word = rawWords[i];
+    if (!word) continue;
+    
+    const lowerWord = word.toLowerCase();
+    
+    // Check for acronyms first (all caps, 2-5 letters)
+    if (/^[A-Z]{2,5}$/.test(word)) {
+      acronyms.add(word); // Keep original case
+      continue;
+    }
+    
+    // Check for proper nouns (capitalized, not first word, not all caps)
+    // In English bridge text, we check for capitalized words mid-sentence
+    const isFirstWord = i === 0;
+    if (!isFirstWord && /^[A-Z][a-z]+/.test(word)) {
+      properNouns.add(word); // Keep original case for matching
+      // Also add to content words as lowercase for fallback
+      if (lowerWord.length >= 3) {
+        contentWords.add(lowerWord);
+      }
+      continue;
+    }
+
     // Skip short words, filler words, and non-alphanumeric
-    if (word.length < 3) continue;
-    if (ENGLISH_FILLER_WORDS.has(word)) continue;
-    if (!/^[a-z0-9]+$/i.test(word)) continue;
+    if (lowerWord.length < 3) continue;
+    if (ENGLISH_FILLER_WORDS.has(lowerWord)) continue;
+    if (!/^[a-z0-9]+$/i.test(lowerWord)) continue;
 
-    contentWords.add(word);
+    contentWords.add(lowerWord);
   }
 
   // Also add numbers as they're universal anchors
@@ -208,12 +292,34 @@ function extractEnglishContentWords(text: string): Set<string> {
     numbers.forEach(n => contentWords.add(n));
   }
 
-  return contentWords;
+  return { contentWords, properNouns, acronyms };
 }
 
 interface ExtractedWords {
   englishWords: string[];  // Dictionary-translated words
   sourceWords: string[];   // Original content words (for cognate matching)
+  properNouns: string[];   // Capitalized proper nouns/names (high-weight exact match)
+  acronyms: string[];      // All-caps acronyms like USA, EU, NATO
+}
+
+// Check if a word is likely a proper noun (capitalized, not at sentence start)
+function isLikelyProperNoun(word: string, isFirstWord: boolean): boolean {
+  // Must start with uppercase
+  if (!/^[A-ZÄÖÜÉÈÊËÀÂÎÏÔÛÙÇ]/.test(word)) return false;
+  
+  // If first word of sentence, can't tell for sure - be conservative
+  if (isFirstWord) return false;
+  
+  // All-caps short words are acronyms, not proper nouns
+  if (/^[A-Z]{2,5}$/.test(word)) return false;
+  
+  // Mixed case starting with uppercase = proper noun (e.g., "Samet", "München")
+  return true;
+}
+
+// Check if a word is an acronym (all caps, 2-5 letters)
+function isAcronym(word: string): boolean {
+  return /^[A-Z]{2,5}$/.test(word);
 }
 
 // Extract content words from translated sentence and translate them to English
@@ -225,11 +331,15 @@ function extractAndTranslateContentWords(
   const words = sentence.split(/[\s,.!?;:'"()\[\]{}–—-]+/).filter(w => w.length > 0);
   const englishWords: string[] = [];
   const sourceWords: string[] = [];
+  const properNouns: string[] = [];
+  const acronyms: string[] = [];
 
   // Check if dictionary is available for this language
   const supportedLang = isSupportedLanguage(targetLanguage) ? targetLanguage as SupportedLanguage : null;
 
-  for (const word of words) {
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const isFirstWord = i === 0;
     const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, '');
     if (!cleanWord || cleanWord.length < 2) continue;
 
@@ -238,6 +348,25 @@ function extractAndTranslateContentWords(
     if (numberMatch) {
       englishWords.push(numberMatch[0]);
       sourceWords.push(numberMatch[0]);
+      continue;
+    }
+
+    // Check for acronyms (USA, EU, NATO) - these are high-value exact matches
+    if (isAcronym(cleanWord)) {
+      acronyms.push(cleanWord.toUpperCase());
+      // Also add as regular word for fallback matching
+      sourceWords.push(cleanWord);
+      continue;
+    }
+
+    // Check for proper nouns (names like Samet, places like München)
+    if (isLikelyProperNoun(cleanWord, isFirstWord)) {
+      properNouns.push(cleanWord);
+      // Also add as source word for cognate matching
+      if (cleanWord.length >= 4) {
+        sourceWords.push(cleanWord);
+      }
+      // Don't try dictionary translation for proper nouns - they're names
       continue;
     }
 
@@ -269,7 +398,7 @@ function extractAndTranslateContentWords(
     }
   }
 
-  return { englishWords, sourceWords };
+  return { englishWords, sourceWords, properNouns, acronyms };
 }
 
 // Check if two words are cognates (similar spelling across languages)
@@ -277,13 +406,14 @@ function areCognates(word1: string, word2: string): boolean {
   const w1 = word1.toLowerCase();
   const w2 = word2.toLowerCase();
 
-  // Exact match
+  // Exact match - always true regardless of length
   if (w1 === w2) return true;
 
   // Too different in length
   if (Math.abs(w1.length - w2.length) > 3) return false;
 
-  // Both must be at least 4 chars for cognate matching
+  // For fuzzy matching (non-exact), both must be at least 4 chars
+  // But we already handled exact matches above, so short exact matches work
   if (w1.length < 4 || w2.length < 4) return false;
 
   // Calculate Levenshtein distance
@@ -328,32 +458,68 @@ function areCognates(word1: string, word2: string): boolean {
 function scoreBridgeSentence(
   bridgeSentence: BridgeSentence,
   translatedWords: string[],
-  sourceWords: string[] = []  // Original German words for cognate matching
+  sourceWords: string[] = [],  // Original German words for cognate matching
+  properNouns: string[] = [],  // Proper nouns from source (high-weight exact match)
+  acronyms: string[] = []      // Acronyms from source (highest-weight exact match)
 ): number {
-  if (translatedWords.length === 0 && sourceWords.length === 0) return 0;
+  if (translatedWords.length === 0 && sourceWords.length === 0 && 
+      properNouns.length === 0 && acronyms.length === 0) return 0;
 
   let matches = 0;
   const bridgeWordsArray = Array.from(bridgeSentence.contentWords);
   const matchedBridgeWords = new Set<string>();  // Track what we've already matched
 
-  // Check dictionary-translated words first (higher confidence)
-  for (const word of translatedWords) {
-    const lowerWord = word.toLowerCase();
-    if (bridgeSentence.contentWords.has(lowerWord)) {
-      matches++;
-      matchedBridgeWords.add(lowerWord);  // Mark as matched
+  // 1. Check acronyms first (highest weight) - USA, EU, NATO etc.
+  // These are excellent anchors because they're identical across languages
+  for (const acronym of acronyms) {
+    if (bridgeSentence.acronyms.has(acronym)) {
+      matches += ACRONYM_WEIGHT;
+      matchedBridgeWords.add(acronym.toLowerCase());
     }
   }
 
-  // Check cognates from source words, but skip if bridge word already matched via dictionary
+  // 2. Check proper nouns (high weight) - names like Samet, places like München
+  // Match case-insensitively but with high weight
+  for (const noun of properNouns) {
+    const lowerNoun = noun.toLowerCase();
+    // Check in bridge proper nouns (case-insensitive)
+    let found = false;
+    for (const bridgeNoun of bridgeSentence.properNouns) {
+      if (bridgeNoun.toLowerCase() === lowerNoun) {
+        matches += PROPER_NOUN_WEIGHT;
+        matchedBridgeWords.add(lowerNoun);
+        found = true;
+        break;
+      }
+    }
+    // Also check in content words as fallback
+    if (!found && bridgeSentence.contentWords.has(lowerNoun)) {
+      matches += PROPER_NOUN_WEIGHT;
+      matchedBridgeWords.add(lowerNoun);
+    }
+  }
+
+  // 3. Check dictionary-translated words (standard weight)
+  for (const word of translatedWords) {
+    const lowerWord = word.toLowerCase();
+    if (matchedBridgeWords.has(lowerWord)) continue; // Already matched as proper noun
+    if (bridgeSentence.contentWords.has(lowerWord)) {
+      matches++;
+      matchedBridgeWords.add(lowerWord);
+    }
+  }
+
+  // 4. Check cognates from source words (slightly lower weight)
   for (const sourceWord of sourceWords) {
+    const lowerSource = sourceWord.toLowerCase();
+    if (matchedBridgeWords.has(lowerSource)) continue; // Already matched
+    
     for (const bridgeWord of bridgeWordsArray) {
-      // Skip if this bridge word was already matched via dictionary
       if (matchedBridgeWords.has(bridgeWord)) continue;
 
       if (areCognates(sourceWord, bridgeWord)) {
         matches += 0.8;
-        matchedBridgeWords.add(bridgeWord);  // Mark as matched
+        matchedBridgeWords.add(bridgeWord);
         break;
       }
     }
@@ -403,6 +569,71 @@ function weightedIncreasingSubsequence<T extends { bIdx: number; score: number }
   return selected.reverse();
 }
 
+// Optional embedding-based refinement for low-confidence sentences
+async function refineWithEmbeddings(
+  mapping: number[],
+  matches: { bestIdx: number; bestScore: number; confidence: string }[],
+  translatedSentences: { text: string }[],
+  bridgeSentences: BridgeSentence[],
+  guideAnchors: { tIdx: number; bIdx: number }[],
+  numBridge: number
+): Promise<void> {
+  const client = getOpenAIClient();
+  if (!client) return;
+
+  // Helper to compute expected index via anchors (same as in main loop)
+  function expectedBridgeIdx(tIdx: number): number {
+    let prevAnchor = guideAnchors[0];
+    let nextAnchor = guideAnchors[guideAnchors.length - 1];
+    for (let i = 0; i < guideAnchors.length - 1; i++) {
+      if (tIdx >= guideAnchors[i].tIdx && tIdx <= guideAnchors[i + 1].tIdx) {
+        prevAnchor = guideAnchors[i];
+        nextAnchor = guideAnchors[i + 1];
+        break;
+      }
+    }
+    if (nextAnchor.tIdx === prevAnchor.tIdx) return prevAnchor.bIdx;
+    const progress = (tIdx - prevAnchor.tIdx) / (nextAnchor.tIdx - prevAnchor.tIdx);
+    return prevAnchor.bIdx + Math.round(progress * (nextAnchor.bIdx - prevAnchor.bIdx));
+  }
+
+  for (let tIdx = 0; tIdx < mapping.length; tIdx++) {
+    if (mapping[tIdx] !== -1) continue; // only refine unknowns
+    const match = matches[tIdx];
+    if (match.bestScore >= MIN_CONFIDENCE_SCORE) continue; // already acceptable
+
+    const expected = expectedBridgeIdx(tIdx);
+    const start = Math.max(0, expected - EMBEDDING_WINDOW);
+    const end = Math.min(numBridge - 1, expected + EMBEDDING_WINDOW);
+
+    const candidates: { bIdx: number; text: string }[] = [];
+    for (let bIdx = start; bIdx <= end; bIdx++) {
+      candidates.push({ bIdx, text: bridgeSentences[bIdx].text });
+    }
+
+    // Build batch: first is source, rest are candidates
+    const inputs = [translatedSentences[tIdx].text, ...candidates.map(c => c.text)];
+    try {
+      const embeddings = await embedTexts(client, inputs);
+      const sourceVec = embeddings[0];
+      const sims = candidates.map((c, i) => ({ bIdx: c.bIdx, score: dotProduct(sourceVec, embeddings[i + 1]) }));
+      sims.sort((a, b) => b.score - a.score);
+      if (sims.length === 0) continue;
+      const best = sims[0];
+      const second = sims[1]?.score ?? 0;
+      const distinct = second === 0 ? Infinity : best.score / second;
+
+      if (best.score >= EMBEDDING_SCORE_THRESHOLD && distinct >= EMBEDDING_MARGIN) {
+        mapping[tIdx] = best.bIdx;
+        matches[tIdx].confidence = 'medium';
+        console.log(`[BridgeMapping] Embedding fallback mapped sentence ${tIdx} -> ${best.bIdx} (score ${best.score.toFixed(3)}, distinct ${distinct.toFixed(2)})`);
+      }
+    } catch (err) {
+      console.warn('[BridgeMapping] Embedding fallback failed:', err instanceof Error ? err.message : err);
+    }
+  }
+}
+
 /**
  * Compute the bridge sentence mapping for an article.
  *
@@ -418,11 +649,11 @@ function weightedIncreasingSubsequence<T extends { bIdx: number; score: number }
  * @param targetLanguage - The target language (German, Spanish, French)
  * @returns Array where index is translated sentence index, value is bridge sentence index
  */
-export function computeBridgeSentenceMap(
+export async function computeBridgeSentenceMap(
   timestamps: WordTimestamp[],
   bridgeText: string,
   targetLanguage: string
-): number[] {
+): Promise<number[]> {
   // Parse both texts into sentences
   const translatedSentences = parseTranslatedSentences(timestamps);
   const bridgeSentences = parseBridgeSentences(bridgeText);
@@ -455,10 +686,13 @@ export function computeBridgeSentenceMap(
     const sampleStep = numTranslated > 50 ? 3 : 1;
 
     for (let tIdx = 0; tIdx < numTranslated; tIdx += sampleStep) {
-      const { englishWords, sourceWords } = extractedTranslated[tIdx];
+      const { englishWords, sourceWords, properNouns, acronyms } = extractedTranslated[tIdx];
       
       // Skip sentences with too little information to be unique
-      if (englishWords.length + sourceWords.length < 2) continue;
+      // But acronyms and proper nouns count double since they're high-value
+      const infoScore = englishWords.length + sourceWords.length + 
+                        (properNouns.length * 2) + (acronyms.length * 2);
+      if (infoScore < 2) continue;
 
       let bestB = -1;
       let bestS = 0;
@@ -466,7 +700,7 @@ export function computeBridgeSentenceMap(
 
       // Full scan of bridge sentences
       for (let bIdx = 0; bIdx < numBridge; bIdx++) {
-        const score = scoreBridgeSentence(bridgeSentences[bIdx], englishWords, sourceWords);
+        const score = scoreBridgeSentence(bridgeSentences[bIdx], englishWords, sourceWords, properNouns, acronyms);
         if (score > bestS) {
           secondBestS = bestS;
           bestS = score;
@@ -515,12 +749,15 @@ export function computeBridgeSentenceMap(
     bestScore: number;
     englishWords: string[];
     sourceWords: string[];
+    properNouns: string[];
+    acronyms: string[];
+    confidence: 'high' | 'medium' | 'low' | 'none';  // Track match quality
   }
 
   const matches: SentenceMatch[] = [];
 
   for (let tIdx = 0; tIdx < numTranslated; tIdx++) {
-    const { englishWords, sourceWords } = extractedTranslated[tIdx];
+    const { englishWords, sourceWords, properNouns, acronyms } = extractedTranslated[tIdx];
 
     // Determine expected position based on Piecewise Linear Interpolation of Guide Anchors
     let prevAnchor = guideAnchors[0];
@@ -554,18 +791,35 @@ export function computeBridgeSentenceMap(
     let bestScore = 0;
 
     for (let bIdx = searchStart; bIdx <= searchEnd; bIdx++) {
-      const score = scoreBridgeSentence(bridgeSentences[bIdx], englishWords, sourceWords);
+      const score = scoreBridgeSentence(bridgeSentences[bIdx], englishWords, sourceWords, properNouns, acronyms);
       if (score > bestScore) {
         bestScore = score;
         bestIdx = bIdx;
       }
     }
 
-    matches.push({ bestIdx, bestScore, englishWords, sourceWords });
+    // Determine confidence level based on score and available information
+    const totalInfo = englishWords.length + sourceWords.length + properNouns.length + acronyms.length;
+    let confidence: 'high' | 'medium' | 'low' | 'none';
+    
+    if (bestScore >= LOCAL_ANCHOR_SCORE) {
+      confidence = 'high';
+    } else if (bestScore >= MIN_CONFIDENCE_SCORE) {
+      confidence = 'medium';
+    } else if (bestScore > 0 || totalInfo === 0) {
+      // Some match or no info to match against
+      confidence = 'low';
+    } else {
+      // Had words to match but found nothing
+      confidence = 'none';
+    }
+
+    matches.push({ bestIdx, bestScore, englishWords, sourceWords, properNouns, acronyms, confidence });
   }
 
   // Step 3: Identify anchor candidates (high-confidence matches) for LIS
   // An anchor must have score >= threshold OR be a strong short-sentence match
+  // OR have high-value matches (proper nouns, acronyms)
   const anchorCandidates: { tIdx: number; bIdx: number; score: number }[] = [];
 
   for (let tIdx = 0; tIdx < numTranslated; tIdx++) {
@@ -574,13 +828,19 @@ export function computeBridgeSentenceMap(
     // Adaptive Threshold:
     // 1. Standard high score
     // 2. Or near-perfect match for short sentences based on dictionary words
+    // 3. Or has proper noun/acronym match (these are very reliable)
     const totalDictWords = match.englishWords.length;
     const isPerfectShort =
       totalDictWords > 0 &&
       totalDictWords <= SHORT_SENTENCE_MAX_WORDS &&
       match.bestScore >= totalDictWords * SHORT_SENTENCE_MATCH_RATIO;
+    
+    // Proper nouns and acronyms are high-value - if we matched one, that's significant
+    const hasHighValueMatch = 
+      (match.properNouns.length > 0 || match.acronyms.length > 0) && 
+      match.bestScore >= PROPER_NOUN_WEIGHT;  // At least matched one proper noun/acronym
 
-    if (match.bestScore >= LOCAL_ANCHOR_SCORE || isPerfectShort) {
+    if (match.bestScore >= LOCAL_ANCHOR_SCORE || isPerfectShort || hasHighValueMatch) {
       anchorCandidates.push({ tIdx, bIdx: match.bestIdx, score: match.bestScore });
     }
   }
@@ -636,8 +896,10 @@ export function computeBridgeSentenceMap(
 
   console.log(`[BridgeMapping] Found ${validAnchors.length} anchors (from ${anchorCandidates.length} candidates): ${validAnchors.map(a => `${a.tIdx}→${a.bIdx}`).join(', ')}`);
 
-  // Step 5: Interpolate between anchors
+  // Step 5: Interpolate between anchors with confidence-aware mapping
+  // Use -1 to indicate "no confident mapping" for low-confidence sentences
   const mapping: number[] = new Array(numTranslated);
+  const confidenceLevels: ('high' | 'medium' | 'low' | 'none')[] = new Array(numTranslated);
 
   for (let i = 0; i < validAnchors.length - 1; i++) {
     const startAnchor = validAnchors[i];
@@ -647,19 +909,31 @@ export function computeBridgeSentenceMap(
     const bRange = endAnchor.bIdx - startAnchor.bIdx;
 
     for (let tIdx = startAnchor.tIdx; tIdx <= endAnchor.tIdx; tIdx++) {
+      const match = matches[tIdx];
+      confidenceLevels[tIdx] = match.confidence;
+      
       if (tIdx === startAnchor.tIdx) {
         mapping[tIdx] = startAnchor.bIdx;
       } else if (tIdx === endAnchor.tIdx) {
         mapping[tIdx] = endAnchor.bIdx;
       } else {
+        // If we have effectively no signal, mark as unknown (-1) and skip interpolation
+        if (match.confidence === 'none' || match.bestScore < MIN_CONFIDENCE_SCORE) {
+          mapping[tIdx] = -1;
+          continue;
+        }
+
         // Linear interpolation
         const progress = (tIdx - startAnchor.tIdx) / tRange;
         const interpolatedIdx = startAnchor.bIdx + Math.round(progress * bRange);
 
-        // But prefer a good content match if available nearby
-        // Use tighter tolerance: max 3 sentences or 15% of range, whichever is smaller
-        const match = matches[tIdx];
-        if (match.bestScore >= 1) {
+        // Decision based on confidence level:
+        // - High/Medium confidence: prefer the content match if within tolerance
+        // - Low confidence: use interpolation but could mark as uncertain
+        // - None confidence: use -1 to indicate "no good match"
+        
+        if (match.confidence === 'high' || match.confidence === 'medium') {
+          // We have a decent match - use it if it's reasonably close to expected
           const maxTolerance = Math.min(
             INTERPOLATION_TOLERANCE_MAX,
             Math.max(1, Math.ceil(bRange * INTERPOLATION_TOLERANCE_FRACTION))
@@ -670,7 +944,7 @@ export function computeBridgeSentenceMap(
             continue;
           }
         }
-
+        
         mapping[tIdx] = interpolatedIdx;
       }
     }
@@ -679,20 +953,31 @@ export function computeBridgeSentenceMap(
   // Handle any remaining sentences (shouldn't happen with proper anchors)
   for (let tIdx = 0; tIdx < numTranslated; tIdx++) {
     if (mapping[tIdx] === undefined) {
-      const expectedIdx = Math.floor((tIdx / numTranslated) * numBridge);
-      mapping[tIdx] = Math.min(expectedIdx, numBridge - 1);
+      mapping[tIdx] = -1;
+      confidenceLevels[tIdx] = 'none';
     }
   }
 
   // Step 6: Smooth out any remaining jumps
   // If a sentence jumps backward significantly, smooth it
+  await refineWithEmbeddings(mapping, matches, translatedSentences, bridgeSentences, guideAnchors, numBridge);
+
   for (let tIdx = 1; tIdx < numTranslated; tIdx++) {
+    if (mapping[tIdx] === -1 || mapping[tIdx - 1] === -1) continue;
     if (mapping[tIdx] < mapping[tIdx - 1] - 1) {
       // This sentence goes backwards too much - use previous or interpolate
       mapping[tIdx] = mapping[tIdx - 1];
     }
   }
 
+  // Log confidence summary for debugging
+  const confidenceSummary = {
+    high: confidenceLevels.filter(c => c === 'high').length,
+    medium: confidenceLevels.filter(c => c === 'medium').length,
+    low: confidenceLevels.filter(c => c === 'low').length,
+    none: confidenceLevels.filter(c => c === 'none').length,
+  };
+  console.log(`[BridgeMapping] Confidence summary: ${JSON.stringify(confidenceSummary)}`);
   console.log(`[BridgeMapping] Final mapping: ${mapping.join(', ')}`);
 
   return mapping;
