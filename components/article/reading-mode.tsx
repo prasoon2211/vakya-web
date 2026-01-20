@@ -116,10 +116,8 @@ export function ReadingMode({
     return false;
   });
 
-  // Stable window state - only shifts when center approaches edge
-  const WINDOW_SIZE = 6; // Number of sentences to show
-  const SENTENCES_BEFORE = 1; // How many sentences to show BEFORE the center
-  const [windowStartIdx, setWindowStartIdx] = useState(0);
+  // Context display configuration
+  const CONTEXT_WORDS = 20; // Number of words to show before/after the mapped sentence
 
   // Combine all bridge text from blocks
   const fullBridgeText = useMemo(() => {
@@ -176,45 +174,42 @@ export function ReadingMode({
     });
   }, []);
 
-  // Update window position only when center approaches edge (hysteresis)
-  useEffect(() => {
-    if (!hasBridge || bridgeSentences.length === 0) return;
-
-    const windowEndIdx = windowStartIdx + WINDOW_SIZE - 1;
-    const idealCenterPosition = SENTENCES_BEFORE;
-    const currentCenterPosition = centerSentenceIdx - windowStartIdx;
-
-    let newWindowStart = windowStartIdx;
-
-    if (centerSentenceIdx > windowEndIdx) {
-      newWindowStart = Math.max(0, centerSentenceIdx - idealCenterPosition);
-    } else if (centerSentenceIdx < windowStartIdx) {
-      newWindowStart = Math.max(0, centerSentenceIdx - idealCenterPosition);
-    } else if (currentCenterPosition > WINDOW_SIZE - 2) {
-      newWindowStart = Math.max(0, centerSentenceIdx - idealCenterPosition);
+  // Build context display: mapped sentence in middle, ~20 words before/after
+  const contextDisplay = useMemo(() => {
+    if (!hasBridge || bridgeSentences.length === 0) {
+      return { beforeContext: "", mainSentence: "", afterContext: "" };
     }
 
-    const maxStart = Math.max(0, bridgeSentences.length - WINDOW_SIZE);
-    newWindowStart = Math.max(0, Math.min(newWindowStart, maxStart));
+    const mainSentence = bridgeSentences[centerSentenceIdx]?.text || "";
 
-    if (newWindowStart !== windowStartIdx) {
-      setWindowStartIdx(newWindowStart);
+    // Collect words before the mapped sentence
+    let beforeWords: string[] = [];
+    for (let i = centerSentenceIdx - 1; i >= 0 && beforeWords.length < CONTEXT_WORDS; i--) {
+      const sentenceWords = bridgeSentences[i].text.split(/\s+/);
+      beforeWords = [...sentenceWords, ...beforeWords];
     }
-  }, [centerSentenceIdx, windowStartIdx, hasBridge, bridgeSentences.length]);
+    // Trim to approximately CONTEXT_WORDS
+    if (beforeWords.length > CONTEXT_WORDS) {
+      beforeWords = beforeWords.slice(beforeWords.length - CONTEXT_WORDS);
+    }
 
-  // Build array of sentences for display
-  const displayedSentences = useMemo(() => {
-    if (!hasBridge || bridgeSentences.length === 0) return [];
-    const endIdx = Math.min(windowStartIdx + WINDOW_SIZE, bridgeSentences.length);
-    return bridgeSentences.slice(windowStartIdx, endIdx).map(s => s.text);
-  }, [hasBridge, bridgeSentences, windowStartIdx]);
+    // Collect words after the mapped sentence
+    let afterWords: string[] = [];
+    for (let i = centerSentenceIdx + 1; i < bridgeSentences.length && afterWords.length < CONTEXT_WORDS; i++) {
+      const sentenceWords = bridgeSentences[i].text.split(/\s+/);
+      afterWords = [...afterWords, ...sentenceWords];
+    }
+    // Trim to approximately CONTEXT_WORDS
+    if (afterWords.length > CONTEXT_WORDS) {
+      afterWords = afterWords.slice(0, CONTEXT_WORDS);
+    }
 
-  // Calculate which sentence in the window should be highlighted
-  const highlightIdx = useMemo(() => {
-    if (displayedSentences.length === 0) return -1;
-    const idx = centerSentenceIdx - windowStartIdx;
-    return Math.max(0, Math.min(idx, displayedSentences.length - 1));
-  }, [centerSentenceIdx, windowStartIdx, displayedSentences.length]);
+    return {
+      beforeContext: beforeWords.join(" "),
+      mainSentence,
+      afterContext: afterWords.join(" "),
+    };
+  }, [hasBridge, bridgeSentences, centerSentenceIdx, CONTEXT_WORDS]);
 
   // Update current word based on audio time (only during playback)
   useEffect(() => {
@@ -422,33 +417,41 @@ export function ReadingMode({
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#faf8f5] flex flex-col">
-      {/* Hidden audio element */}
-      <audio ref={audioRef} src={audioUrl} preload="auto" />
+    <div
+      className="fixed inset-0 z-50 bg-black/20 md:bg-black/40 flex items-center justify-center"
+      onClick={(e) => {
+        // Close when clicking backdrop on desktop
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {/* Centered card container - full screen on mobile, card on desktop */}
+      <div className="w-full h-full md:h-auto md:max-h-[90vh] md:w-[600px] md:rounded-2xl md:shadow-2xl bg-[#faf8f5] flex flex-col overflow-hidden">
+        {/* Hidden audio element */}
+        <audio ref={audioRef} src={audioUrl} preload="auto" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#e8dfd3]">
-        <button
-          onClick={onClose}
-          className="p-2 -ml-2 text-[#6b6b6b] hover:text-[#1a1a1a] transition-colors rounded-lg hover:bg-[#e8dfd3]/50"
-          title="Close (Esc)"
-        >
-          <X className="h-5 w-5" />
-        </button>
-        <h2 className="text-[#1a1a1a] text-sm font-medium">Reading Mode</h2>
-        <button
-          onClick={cycleSpeed}
-          className={cn(
-            "px-2.5 py-1 text-sm font-medium rounded-full border transition-all",
-            playbackSpeed !== 1
-              ? "bg-[#c45c3e]/10 border-[#c45c3e]/30 text-[#c45c3e]"
-              : "bg-[#f3ede4] border-[#e8dfd3] text-[#6b6b6b] hover:border-[#d4c5b5]"
-          )}
-          title="Playback speed"
-        >
-          {playbackSpeed}x
-        </button>
-      </div>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#e8dfd3]">
+          <button
+            onClick={onClose}
+            className="p-2 -ml-2 text-[#6b6b6b] hover:text-[#1a1a1a] transition-colors rounded-lg hover:bg-[#e8dfd3]/50"
+            title="Close (Esc)"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <h2 className="text-[#1a1a1a] text-sm font-medium">Reading Mode</h2>
+          <button
+            onClick={cycleSpeed}
+            className={cn(
+              "px-2.5 py-1 text-sm font-medium rounded-full border transition-all",
+              playbackSpeed !== 1
+                ? "bg-[#c45c3e]/10 border-[#c45c3e]/30 text-[#c45c3e]"
+                : "bg-[#f3ede4] border-[#e8dfd3] text-[#6b6b6b] hover:border-[#d4c5b5]"
+            )}
+            title="Playback speed"
+          >
+            {playbackSpeed}x
+          </button>
+        </div>
 
       {/* Main content - word display */}
       <ReadingModeText
@@ -485,24 +488,29 @@ export function ReadingMode({
               showBridgeContext ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
             )}
           >
-            <div className="px-4 pb-3">
+            <div className="px-4 pb-3 space-y-2">
+              {/* Context before */}
+              {contextDisplay.beforeContext && (
+                <p className="text-xs text-[#8a8a8a] leading-relaxed">
+                  {contextDisplay.beforeContext}
+                </p>
+              )}
+              {/* Main mapped sentence */}
               <p className="text-sm text-[#4a4a4a] leading-relaxed">
-                {displayedSentences.length > 0 ? (
-                  displayedSentences.map((sentence, i) => (
-                    <span
-                      key={`${windowStartIdx}-${i}`}
-                      className={cn(
-                        "transition-colors duration-300",
-                        i === highlightIdx && "bg-amber-100/50 rounded px-0.5 -mx-0.5"
-                      )}
-                    >
-                      {sentence}{" "}
-                    </span>
-                  ))
+                {contextDisplay.mainSentence ? (
+                  <span className="bg-amber-100/50 rounded px-1 -mx-1">
+                    {contextDisplay.mainSentence}
+                  </span>
                 ) : (
                   "..."
                 )}
               </p>
+              {/* Context after */}
+              {contextDisplay.afterContext && (
+                <p className="text-xs text-[#8a8a8a] leading-relaxed">
+                  {contextDisplay.afterContext}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -677,6 +685,7 @@ export function ReadingMode({
         <p className="sm:hidden text-center text-[#9a9a9a] text-xs mt-4">
           Tap any word to pause and see its meaning
         </p>
+      </div>
       </div>
     </div>
   );

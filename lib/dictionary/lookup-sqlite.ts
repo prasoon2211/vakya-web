@@ -312,12 +312,24 @@ export function lookupWord(
         const baseWord = extractBaseWord(entry.definition);
         if (baseWord && baseWord.toLowerCase() !== normalizedWord) {
           const baseEntry = lookupWord(baseWord, language, depth + 1, visitedWords);
-          if (baseEntry && baseEntry.definition && !isInflectionReference(baseEntry.definition)) {
-            return {
-              ...baseEntry,
-              word: entry.word,
-              definition: `${baseEntry.definition} (${entry.definition})`,
-            };
+          if (baseEntry && baseEntry.definition) {
+            // Found base entry with a definition
+            if (!isInflectionReference(baseEntry.definition)) {
+              // Base has a real definition - merge it
+              return {
+                ...baseEntry,
+                word: entry.word,
+                definition: `${baseEntry.definition} (${entry.definition})`,
+              };
+            } else {
+              // Base entry is also a reference - still try to show something useful
+              // Include the base's definition chain: "X (gerund of Y) (Y form of Z)"
+              return {
+                ...baseEntry,
+                word: entry.word,
+                definition: `${baseEntry.definition} (${entry.definition})`,
+              };
+            }
           }
         }
       }

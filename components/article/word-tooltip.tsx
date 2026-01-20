@@ -105,6 +105,28 @@ function getWiktionaryUrl(word: string, language: string): string {
   )}#${encodeURIComponent(langAnchor)}`;
 }
 
+// Check if a definition is just an inflection reference without a real meaning
+// e.g., "gerund of überlaufen" should trigger AI lookup for full meaning
+function isIncompleteDefinition(definition: string | undefined): boolean {
+  if (!definition) return true;
+
+  // Patterns that indicate the definition is just a reference, not a real meaning
+  const inflectionPatterns = [
+    /^(plural|singular|inflection|gerund|participle|infinitive) of /i,
+    /^(past|present|perfect|future|active|passive) participle of /i,
+    /^(first|second|third)[- ]person .* of /i,
+    /^(nominative|accusative|genitive|dative|vocative) .* of /i,
+    /^(masculine|feminine|neuter) .* of /i,
+    /^(comparative|superlative) (form |degree )?of /i,
+    /^(diminutive|augmentative) (form )?of /i,
+    /^(alternative|archaic|obsolete|dated) (form|spelling) of /i,
+    /^(strong|weak|mixed) (genitive|inflection|form) of /i,
+    /^from: /i,
+  ];
+
+  return inflectionPatterns.some((p) => p.test(definition));
+}
+
 export function WordTooltip({
   word,
   contextSentence,
@@ -158,7 +180,11 @@ export function WordTooltip({
       const data = await res.json();
       setDictionaryResult(data);
 
-      if (!data.found) {
+      // Auto-trigger AI if:
+      // 1. Word not found in dictionary, OR
+      // 2. Definition is just an inflection reference without real meaning
+      const primaryDef = data.definitions?.[0] || data.translation;
+      if (!data.found || isIncompleteDefinition(primaryDef)) {
         handleAnalyzeWithAI();
       }
     } catch {

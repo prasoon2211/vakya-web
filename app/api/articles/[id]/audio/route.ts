@@ -35,6 +35,36 @@ const TTS_INSTRUCTIONS: Record<string, string> = {
   French: "Speak in French with clear, native French pronunciation. Use a calm, measured pace suitable for language learners. Enunciate clearly and naturally.",
 };
 
+// Conservative chunk size to stay well under 2000 token limit
+// German compound words tokenize heavily, so we use ~1000 chars as target
+const TARGET_CHUNK_CHARS = 1000;
+
+// Split text into chunks at sentence boundaries
+function splitTextIntoChunks(text: string): string[] {
+  const chunks: string[] = [];
+  let currentChunk = "";
+
+  // Split by sentences (preserving the punctuation)
+  const sentences = text.match(/[^.!?]+[.!?]+\s*/g) || [text];
+
+  for (const sentence of sentences) {
+    // If adding this sentence would exceed target and we have content, start new chunk
+    if (currentChunk.length > 0 && currentChunk.length + sentence.length > TARGET_CHUNK_CHARS) {
+      chunks.push(currentChunk.trim());
+      currentChunk = sentence;
+    } else {
+      currentChunk += sentence;
+    }
+  }
+
+  // Don't forget the last chunk
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks;
+}
+
 // GET - Get signed URL for existing audio
 export async function GET(
   request: Request,
@@ -147,23 +177,33 @@ export async function POST(
       );
     }
 
-    // Combine translated text
+    // Combine translated text (no truncation - we'll chunk it)
     const translatedText = blocks
       .map((block) => block.translated)
-      .join("\n\n")
-      .slice(0, 4096); // OpenAI TTS limit
+      .join("\n\n");
 
-    // Generate audio with OpenAI TTS using language-specific instructions
+    // Split into chunks at sentence boundaries to stay under token limit
+    const chunks = splitTextIntoChunks(translatedText);
+    console.log(`[Audio] Splitting text into ${chunks.length} chunks for TTS`);
+
+    // Generate audio for all chunks in parallel
     const ttsInstructions = TTS_INSTRUCTIONS[article.targetLanguage] || TTS_INSTRUCTIONS.German;
-    const mp3 = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts",
-      voice: "coral",
-      input: translatedText,
-      instructions: ttsInstructions,
-    });
+    const audioBuffers = await Promise.all(
+      chunks.map(async (chunk, index) => {
+        console.log(`[Audio] Generating TTS for chunk ${index + 1}/${chunks.length} (${chunk.length} chars)`);
+        const mp3 = await openai.audio.speech.create({
+          model: "gpt-4o-mini-tts",
+          voice: "coral",
+          input: chunk,
+          instructions: ttsInstructions,
+        });
+        return Buffer.from(await mp3.arrayBuffer());
+      })
+    );
 
-    // Convert to buffer
-    const buffer = Buffer.from(await mp3.arrayBuffer());
+    // Concatenate all audio buffers
+    const buffer = Buffer.concat(audioBuffers);
+    console.log(`[Audio] Combined ${audioBuffers.length} audio chunks into ${buffer.length} bytes`);
 
     // Upload to R2 - store just the key, not full URL
     const audioKey = `audio/${id}.mp3`;
