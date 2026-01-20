@@ -43,6 +43,10 @@ interface UserWithStats {
   completedArticles: number;
   savedWordsCount: number;
   lastActiveAt: string | null;
+  // Clerk info
+  clerkEmail: string | null;
+  clerkName: string | null;
+  clerkImageUrl: string | null;
 }
 
 interface Stats {
@@ -62,6 +66,16 @@ export default function AdminPage() {
   const [isAdding, setIsAdding] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isSeeding, setIsSeeding] = useState(false);
+  const [oldClerkId, setOldClerkId] = useState("");
+  const [newClerkId, setNewClerkId] = useState("");
+  const [isPorting, setIsPorting] = useState(false);
+  const [portResult, setPortResult] = useState<{
+    success?: boolean;
+    warning?: boolean;
+    message?: string;
+    oldUser?: { id: string; clerkId: string; articles: number; words: number };
+    newUser?: { id: string; clerkId: string; articles: number; words: number };
+  } | null>(null);
 
   // Fetch data on tab change
   useEffect(() => {
@@ -217,6 +231,56 @@ export default function AdminPage() {
     if (diffDays < 7) return `${diffDays} days ago`;
     if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
     return formatDate(dateStr);
+  };
+
+  const handlePortAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!oldClerkId.trim() || !newClerkId.trim()) return;
+
+    setIsPorting(true);
+    setPortResult(null);
+
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          oldClerkId: oldClerkId.trim(),
+          newClerkId: newClerkId.trim(),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast({
+          title: data.error || "Failed to port account",
+          variant: "error",
+        });
+        return;
+      }
+
+      if (data.success) {
+        toast({
+          title: "Account ported successfully",
+          description: data.message,
+          variant: "success",
+        });
+        setOldClerkId("");
+        setNewClerkId("");
+        setPortResult(null);
+        fetchUsers(); // Refresh the list
+      } else if (data.warning) {
+        setPortResult(data);
+      }
+    } catch (error) {
+      toast({
+        title: "Failed to port account",
+        variant: "error",
+      });
+    } finally {
+      setIsPorting(false);
+    }
   };
 
   return (
@@ -402,6 +466,55 @@ export default function AdminPage() {
             </div>
           )}
 
+          {/* Port Account */}
+          <Card className="p-4">
+            <h3 className="font-medium text-[#1a1a1a] mb-3">Port Account</h3>
+            <p className="text-sm text-[#6b6b6b] mb-4">
+              Transfer data from an old Clerk ID to a new one. This updates the old user&apos;s clerk_id and deletes the new user record if it exists.
+            </p>
+            <form onSubmit={handlePortAccount} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  value={oldClerkId}
+                  onChange={(e) => setOldClerkId(e.target.value)}
+                  placeholder="Old Clerk ID (user_xxx...)"
+                  className="font-mono text-sm"
+                />
+                <Input
+                  value={newClerkId}
+                  onChange={(e) => setNewClerkId(e.target.value)}
+                  placeholder="New Clerk ID (user_xxx...)"
+                  className="font-mono text-sm"
+                />
+              </div>
+              {portResult?.warning && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+                  <p className="font-medium text-amber-800 mb-2">⚠️ Warning</p>
+                  <p className="text-amber-700">{portResult.message}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-4 text-amber-700">
+                    <div>
+                      <p className="font-medium">Old user (keep):</p>
+                      <p>{portResult.oldUser?.articles} articles, {portResult.oldUser?.words} words</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">New user (delete):</p>
+                      <p>{portResult.newUser?.articles} articles, {portResult.newUser?.words} words</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <Button
+                type="submit"
+                disabled={isPorting || !oldClerkId.trim() || !newClerkId.trim()}
+              >
+                {isPorting ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                Port Account
+              </Button>
+            </form>
+          </Card>
+
           {/* Users List */}
           <Card>
             {isLoading ? (
@@ -420,23 +533,57 @@ export default function AdminPage() {
                     className="p-4 hover:bg-[#faf8f5] transition-colors"
                   >
                     <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-[#1a1a1a] truncate">
-                            {user.email || "No email"}
-                          </span>
-                          <Badge variant="secondary">
-                            {user.targetLanguage} {user.cefrLevel}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-[#6b6b6b]">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            Joined {formatDate(user.createdAt)}
-                          </span>
-                          <span>
-                            Active {formatRelativeDate(user.lastActiveAt)}
-                          </span>
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        {/* Avatar */}
+                        {user.clerkImageUrl ? (
+                          <img
+                            src={user.clerkImageUrl}
+                            alt=""
+                            className="w-10 h-10 rounded-full flex-shrink-0"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-[#e8dfd3] flex items-center justify-center flex-shrink-0">
+                            <Users className="w-5 h-5 text-[#6b6b6b]" />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-[#1a1a1a] truncate">
+                              {user.clerkName || user.clerkEmail || user.email || "Unknown user"}
+                            </span>
+                            <Badge variant="secondary">
+                              {user.targetLanguage} {user.cefrLevel}
+                            </Badge>
+                            {!user.clerkEmail && (
+                              <Badge variant="secondary" className="bg-amber-100 text-amber-700">
+                                Not in Clerk
+                              </Badge>
+                            )}
+                          </div>
+                          {user.clerkName && user.clerkEmail && (
+                            <p className="text-sm text-[#6b6b6b] truncate mb-1">
+                              {user.clerkEmail}
+                            </p>
+                          )}
+                          <p
+                            className="text-xs text-[#9a9a9a] font-mono truncate mb-1 cursor-pointer hover:text-[#6b6b6b]"
+                            onClick={() => {
+                              navigator.clipboard.writeText(user.clerkId);
+                              toast({ title: "Clerk ID copied", variant: "success" });
+                            }}
+                            title="Click to copy"
+                          >
+                            {user.clerkId}
+                          </p>
+                          <div className="flex items-center gap-4 text-sm text-[#6b6b6b]">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              Joined {formatDate(user.createdAt)}
+                            </span>
+                            <span>
+                              Active {formatRelativeDate(user.lastActiveAt)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-4 text-sm">
