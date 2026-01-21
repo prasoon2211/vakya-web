@@ -488,13 +488,13 @@ async function translateChunk(
 {
   "original": "cleaned source text (no HTML/ads)",
   "translated": "your ${targetLanguage} translation",
-  "bridge": "literal English translation of your ${targetLanguage} output"
+  "bridge": "literal English translation of your ${targetLanguage} output (preserve paragraph breaks with \\n\\n)"
 }`
     : `Output JSON:
 {
   "original": "source text unchanged",
   "translated": "your ${targetLanguage} translation",
-  "bridge": "literal English translation of your ${targetLanguage} output"
+  "bridge": "literal English translation of your ${targetLanguage} output (preserve paragraph breaks with \\n\\n)"
 }`;
 
   const prompt = `Translate into ${targetLanguage} at ${cefrLevel} level.

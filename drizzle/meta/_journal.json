@@ -64,6 +64,13 @@
       "when": 1768823913639,
       "tag": "0008_exotic_khan",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1768994078637,
+      "tag": "0009_panoramic_proudstar",
+      "breakpoints": true
     }
   ]
 }

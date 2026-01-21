@@ -495,6 +495,40 @@ export default function VocabularyPage() {
                   </div>
                 )}
 
+                {/* Forms Seen */}
+                {selectedWord.formsSeen && (() => {
+                  try {
+                    const forms = JSON.parse(selectedWord.formsSeen) as string[];
+                    if (forms.length > 1) {
+                      return (
+                        <div className="mt-6 bg-[#faf8f5] rounded-xl p-4 border border-[#f3ede4]">
+                          <p className="text-xs font-medium text-[#9a9a9a] uppercase tracking-wide mb-2">
+                            Forms encountered
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {forms.map((form, i) => (
+                              <span
+                                key={i}
+                                className={cn(
+                                  "px-2 py-1 rounded-full text-sm",
+                                  form === selectedWord.word
+                                    ? "bg-[#c45c3e]/10 text-[#c45c3e] font-medium"
+                                    : "bg-[#f0ebe3] text-[#6b6b6b]"
+                                )}
+                              >
+                                {form}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }
+                  } catch {
+                    // Invalid JSON, ignore
+                  }
+                  return null;
+                })()}
+
                 {/* Mastery Progress */}
                 <div className="mt-6 flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -577,6 +611,40 @@ export default function VocabularyPage() {
                     <p className="text-[#6b6b6b] break-words">{selectedWord.notes}</p>
                   </div>
                 )}
+
+                {/* Forms Seen */}
+                {selectedWord.formsSeen && (() => {
+                  try {
+                    const forms = JSON.parse(selectedWord.formsSeen) as string[];
+                    if (forms.length > 1) {
+                      return (
+                        <div>
+                          <p className="text-xs text-[#9a9a9a] uppercase tracking-wide mb-1">
+                            Forms encountered
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {forms.map((form, i) => (
+                              <span
+                                key={i}
+                                className={cn(
+                                  "px-2 py-0.5 rounded-full text-xs",
+                                  form === selectedWord.word
+                                    ? "bg-[#c45c3e]/10 text-[#c45c3e] font-medium"
+                                    : "bg-[#f0ebe3] text-[#6b6b6b]"
+                                )}
+                              >
+                                {form}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }
+                  } catch {
+                    // Invalid JSON, ignore
+                  }
+                  return null;
+                })()}
 
                 <div className="flex items-center justify-between pt-2">
                   <Badge variant={getMasteryBadge(selectedWord.masteryLevel).variant}>

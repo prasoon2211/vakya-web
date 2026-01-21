@@ -72,6 +72,12 @@ export const savedWords = pgTable(
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
     word: text("word").notNull(),
+    // Lemmatization fields
+    lemma: text("lemma"), // Base dictionary form (e.g., "laufen" for "gelaufen")
+    originalForm: text("original_form"), // First form user encountered (e.g., "gelaufen")
+    formType: text("form_type"), // How original relates to lemma: "past_participle", "plural", etc.
+    formsSeen: text("forms_seen"), // JSON array of all forms encountered: ["Hund", "Hunde", "Hundes"]
+    encounterCount: integer("encounter_count").default(1).notNull(),
     contextSentence: text("context_sentence"),
     translation: text("translation"),
     partOfSpeech: text("part_of_speech"),
@@ -89,11 +95,16 @@ export const savedWords = pgTable(
   (table) => [
     index("idx_saved_words_user_id").on(table.userId),
     index("idx_saved_words_next_review").on(table.nextReviewAt),
+    index("idx_saved_words_lemma").on(table.lemma),
+    // Keep old constraint for backwards compatibility during migration
     unique("saved_words_user_word_lang").on(
       table.userId,
       table.word,
       table.targetLanguage
     ),
+    // Note: New lemma-based unique constraint will be added via manual SQL migration
+    // after running the backfill script to avoid constraint violations on existing data
+    // The constraint: CREATE UNIQUE INDEX saved_words_user_lemma_lang ON saved_words(user_id, lemma, target_language) WHERE lemma IS NOT NULL;
   ]
 );
 
@@ -111,6 +122,26 @@ export const allowlist = pgTable(
   (table) => [
     index("idx_allowlist_entry").on(table.entry),
     index("idx_allowlist_type").on(table.type),
+  ]
+);
+
+// Multiple contexts per saved word
+export const wordContexts = pgTable(
+  "word_contexts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    savedWordId: uuid("saved_word_id")
+      .references(() => savedWords.id, { onDelete: "cascade" })
+      .notNull(),
+    contextSentence: text("context_sentence").notNull(),
+    encounteredForm: text("encountered_form").notNull(), // The form seen in this context
+    sourceArticleId: uuid("source_article_id").references(() => articles.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_word_contexts_saved_word").on(table.savedWordId),
   ]
 );
 
@@ -141,6 +172,8 @@ export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
 export type SavedWord = typeof savedWords.$inferSelect;
 export type NewSavedWord = typeof savedWords.$inferInsert;
+export type WordContext = typeof wordContexts.$inferSelect;
+export type NewWordContext = typeof wordContexts.$inferInsert;
 export type WordCache = typeof wordCache.$inferSelect;
 export type NewWordCache = typeof wordCache.$inferInsert;
 export type Allowlist = typeof allowlist.$inferSelect;

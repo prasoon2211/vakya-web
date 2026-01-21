@@ -4,11 +4,17 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { WordTimestamp } from "@/lib/audio/align-timestamps";
 import { WordTooltip } from "./word-tooltip";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/lib/hooks/use-media-query";
 import {
   Drawer,
   DrawerContent,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import {
+  Popover,
+  PopoverContent,
+  PopoverAnchor,
+} from "@/components/ui/popover";
 
 interface ReadingModeTextProps {
   timestamps: WordTimestamp[];
@@ -31,8 +37,10 @@ export function ReadingModeText({
 }: ReadingModeTextProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const currentWordRef = useRef<HTMLSpanElement>(null);
+  const selectedWordRef = useRef<HTMLSpanElement>(null);
   const [selectedWordIndex, setSelectedWordIndex] = useState<number | null>(null);
   const [showTooltip, setShowTooltip] = useState(false);
+  const isMobile = useIsMobile();
 
   // Auto-scroll to keep current word visible
   useEffect(() => {
@@ -55,9 +63,15 @@ export function ReadingModeText({
     }
   }, [currentWordIndex]);
 
-  const handleWordClick = useCallback((absoluteIndex: number) => {
+  // Track anchor position for desktop popover
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+
+  const handleWordClick = useCallback((absoluteIndex: number, event: React.MouseEvent<HTMLSpanElement>) => {
     onWordClick(absoluteIndex);
     setSelectedWordIndex(absoluteIndex);
+    // Capture the clicked element's rect for desktop popover positioning
+    const rect = event.currentTarget.getBoundingClientRect();
+    setAnchorRect(rect);
     setShowTooltip(true);
   }, [onWordClick]);
 
@@ -124,11 +138,13 @@ export function ReadingModeText({
               const isCurrent = absoluteIndex === currentWordIndex;
               const isPast = absoluteIndex < currentWordIndex;
 
+              const isSelected = absoluteIndex === selectedWordIndex;
+
               return (
                 <span key={absoluteIndex}>
                   <span
-                    ref={isCurrent ? currentWordRef : undefined}
-                    onClick={() => handleWordClick(absoluteIndex)}
+                    ref={isCurrent ? currentWordRef : isSelected ? selectedWordRef : undefined}
+                    onClick={(e) => handleWordClick(absoluteIndex, e)}
                     className={cn(
                       "cursor-pointer transition-all duration-150 select-none rounded-sm",
                       isCurrent && [
@@ -156,29 +172,68 @@ export function ReadingModeText({
         </div>
       </div>
 
-      {/* Word tooltip drawer */}
+      {/* Word tooltip - Drawer on mobile, Popover on desktop */}
       {selectedWordIndex !== null && timestamps[selectedWordIndex] && (
-        <Drawer
-          open={showTooltip}
-          onOpenChange={(open) => {
-            setShowTooltip(open);
-            if (!open) {
-              onTooltipClose();
-            }
-          }}
-        >
-          <DrawerContent className="max-h-[85vh]">
-            <DrawerTitle className="sr-only">Word Definition</DrawerTitle>
-            <div className="px-6 pt-2 pb-10 overflow-y-auto">
+        isMobile ? (
+          <Drawer
+            open={showTooltip}
+            onOpenChange={(open) => {
+              setShowTooltip(open);
+              if (!open) {
+                onTooltipClose();
+              }
+            }}
+          >
+            <DrawerContent className="max-h-[85vh]">
+              <DrawerTitle className="sr-only">Word Definition</DrawerTitle>
+              <div className="px-6 pt-2 pb-10 overflow-y-auto">
+                <WordTooltip
+                  word={timestamps[selectedWordIndex].word}
+                  contextSentence={getContextSentence(selectedWordIndex)}
+                  targetLanguage={targetLanguage}
+                  articleId={articleId}
+                />
+              </div>
+            </DrawerContent>
+          </Drawer>
+        ) : (
+          <Popover
+            open={showTooltip}
+            onOpenChange={(open) => {
+              setShowTooltip(open);
+              if (!open) {
+                onTooltipClose();
+              }
+            }}
+          >
+            {/* Virtual anchor positioned at the clicked word */}
+            <PopoverAnchor asChild>
+              <span
+                style={{
+                  position: 'fixed',
+                  top: anchorRect?.top ?? 0,
+                  left: anchorRect?.left ?? 0,
+                  width: anchorRect?.width ?? 0,
+                  height: anchorRect?.height ?? 0,
+                  pointerEvents: 'none',
+                }}
+              />
+            </PopoverAnchor>
+            <PopoverContent
+              side="top"
+              align="center"
+              sideOffset={8}
+              className="w-80"
+            >
               <WordTooltip
                 word={timestamps[selectedWordIndex].word}
                 contextSentence={getContextSentence(selectedWordIndex)}
                 targetLanguage={targetLanguage}
                 articleId={articleId}
               />
-            </div>
-          </DrawerContent>
-        </Drawer>
+            </PopoverContent>
+          </Popover>
+        )
       )}
     </>
   );

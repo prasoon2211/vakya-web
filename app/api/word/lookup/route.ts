@@ -6,6 +6,9 @@ import {
   type DictionaryEntry,
   type SupportedLanguage,
 } from "@/lib/dictionary/lookup-sqlite";
+import { lemmatizeWord, getFormRelationDescription, formatFormType, cleanWord } from "@/lib/dictionary/lemmatizer";
+import { db, users, savedWords, wordContexts } from "@/lib/db";
+import { eq, and, or, sql, desc } from "drizzle-orm";
 
 // Extract gender and article from German nouns
 function extractGermanGender(entry: DictionaryEntry): { gender: string | null; article: string | null } {
@@ -119,17 +122,89 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Word is required" }, { status: 400 });
     }
 
+    // Clean and normalize word: remove punctuation, lowercase, trim
+    const cleanedWord = cleanWord(word.trim());
+    if (!cleanedWord) {
+      return NextResponse.json({ error: "Word is empty after cleaning" }, { status: 400 });
+    }
+
+    // Get user to check saved words
+    const user = await db.query.users.findFirst({
+      where: eq(users.clerkId, userId),
+      columns: { id: true },
+    });
+
+    // Normalize word: lowercase
+    const normalizedWord = cleanedWord.toLowerCase();
+
+    // Get lemma info for this word
+    const lemmaResult = isSupportedLanguage(language)
+      ? lemmatizeWord(cleanedWord, language)
+      : null;
+    const lemma = lemmaResult?.lemma || normalizedWord;
+    const formType = lemmaResult?.formType || null;
+    const isBaseForm = lemmaResult?.isBaseForm ?? true;
+
+    // Check if word (or its lemma) is already saved by user
+    let alreadySaved = false;
+    let savedWordInfo: {
+      id: string;
+      word: string;
+      lemma: string | null;
+      masteryLevel: number;
+      formsSeen: string[];
+      encounterCount: number;
+    } | null = null;
+
+    if (user) {
+      // Check for saved word by lemma (preferred) or exact word
+      // Note: We compare with cleaned/normalized words since we now clean on save
+      const existingSaved = await db.query.savedWords.findFirst({
+        where: and(
+          eq(savedWords.userId, user.id),
+          eq(savedWords.targetLanguage, language),
+          or(
+            // Check by lemma
+            eq(savedWords.lemma, lemma),
+            // Check by word field
+            eq(savedWords.word, lemma),
+            eq(savedWords.word, normalizedWord),
+            // Fallback for old entries: check with punctuation stripped from saved word
+            sql`REGEXP_REPLACE(LOWER(${savedWords.word}), '[.,!?;:"""''„«»()\\[\\]{}]+$', '') = ${normalizedWord}`
+          )
+        ),
+      });
+
+      if (existingSaved) {
+        alreadySaved = true;
+        const formsSeen: string[] = existingSaved.formsSeen
+          ? JSON.parse(existingSaved.formsSeen)
+          : [existingSaved.originalForm || existingSaved.word];
+
+        savedWordInfo = {
+          id: existingSaved.id,
+          word: existingSaved.word,
+          lemma: existingSaved.lemma,
+          masteryLevel: existingSaved.masteryLevel,
+          formsSeen,
+          encounterCount: existingSaved.encounterCount,
+        };
+      }
+    }
+
     // Check if language is supported
     if (!isSupportedLanguage(language)) {
       return NextResponse.json({
         found: false,
-        word,
+        word: cleanedWord,
         message: `Language "${language}" is not supported. Supported: German, Spanish, French`,
+        alreadySaved,
+        savedWordInfo,
       });
     }
 
     // Look up in Wiktionary SQLite database (1.4M+ entries, instant)
-    const entry: DictionaryEntry | null = lookupWord(word, language as SupportedLanguage);
+    const entry: DictionaryEntry | null = lookupWord(cleanedWord, language as SupportedLanguage);
 
     if (entry) {
       // For German, prefer direct database fields from TU Chemnitz enhancement
@@ -179,6 +254,11 @@ export async function GET(request: Request) {
         }
       }
 
+      // Generate form relationship description if this is an inflected form
+      const formRelation = !isBaseForm && lemma !== normalizedWord
+        ? getFormRelationDescription(normalizedWord, lemma, formType, language)
+        : null;
+
       return NextResponse.json({
         found: true,
         word: entry.word,
@@ -193,6 +273,14 @@ export async function GET(request: Request) {
         audioUrl: entry.audioUrl || null,
         article: genderInfo.article,
         gender: genderInfo.gender,
+        alreadySaved,
+        savedWordInfo,
+        // Lemma info
+        lemma,
+        formType,
+        formTypeDisplay: formatFormType(formType),
+        isBaseForm,
+        formRelation,
         // Additional German-specific fields
         ...(language === 'German' && {
           plural: entry.plural || enhancedParsedForms?.plural || null,
@@ -203,11 +291,18 @@ export async function GET(request: Request) {
       });
     }
 
-    // Word not found
+    // Word not found - still return lemma info if available
     return NextResponse.json({
       found: false,
-      word,
+      word: cleanedWord,
       message: "Word not found in dictionary",
+      alreadySaved,
+      savedWordInfo,
+      // Still include lemma info even if word not found
+      lemma: lemmaResult?.lemma || normalizedWord,
+      formType: lemmaResult?.formType || null,
+      formTypeDisplay: formatFormType(lemmaResult?.formType || null),
+      isBaseForm: lemmaResult?.isBaseForm ?? true,
     });
   } catch (error) {
     console.error("Dictionary lookup error:", error);

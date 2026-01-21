@@ -46,3 +46,4 @@ lib/dictionary/*.db-wal
 lib/dictionary/*.db-shm
 lib/dictionary/.dict-hashes.json
 lib/dictionary/tu-chemnitz-*.txt
+.mcp.json

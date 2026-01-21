@@ -24,6 +24,15 @@ interface WordTooltipProps {
   onRemoveBookmark?: () => void;
 }
 
+interface SavedWordInfo {
+  id: string;
+  word: string;
+  lemma: string | null;
+  masteryLevel: number;
+  formsSeen: string[];
+  encounterCount: number;
+}
+
 interface DictionaryResult {
   found: boolean;
   word: string;
@@ -38,6 +47,14 @@ interface DictionaryResult {
   ipa?: string;
   audioUrl?: string;
   message?: string;
+  alreadySaved?: boolean;
+  savedWordInfo?: SavedWordInfo | null;
+  // Lemma info
+  lemma?: string;
+  formType?: string | null;
+  formTypeDisplay?: string | null;
+  isBaseForm?: boolean;
+  formRelation?: string | null;
 }
 
 interface AIAnalysis {
@@ -113,6 +130,7 @@ function isIncompleteDefinition(definition: string | undefined): boolean {
   // Patterns that indicate the definition is just a reference, not a real meaning
   const inflectionPatterns = [
     /^(plural|singular|inflection|gerund|participle|infinitive) of /i,
+    /^(zu-infinitive|zu infinitive) of /i, // German zu-infinitive
     /^(past|present|perfect|future|active|passive) participle of /i,
     /^(first|second|third)[- ]person .* of /i,
     /^(nominative|accusative|genitive|dative|vocative) .* of /i,
@@ -120,8 +138,11 @@ function isIncompleteDefinition(definition: string | undefined): boolean {
     /^(comparative|superlative) (form |degree )?of /i,
     /^(diminutive|augmentative) (form )?of /i,
     /^(alternative|archaic|obsolete|dated) (form|spelling) of /i,
-    /^(strong|weak|mixed) (genitive|inflection|form) of /i,
+    /^(strong|weak|mixed) .* of /i, // German adjective declensions
+    /^[a-z]+-infinitive of /i, // Any prefixed infinitive (zu-infinitive, etc.)
     /^from: /i,
+    // Catch-all: if it ends with "of [word]" and has grammar terms, it's likely just a reference
+    /\b(singular|plural|nominative|accusative|genitive|dative|comparative|superlative|degree|declension)\b.*\bof\s+\w+$/i,
   ];
 
   return inflectionPatterns.some((p) => p.test(definition));
@@ -144,6 +165,8 @@ export function WordTooltip({
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAddingContext, setIsAddingContext] = useState(false);
+  const [contextAdded, setContextAdded] = useState(false);
   const [showAllDefinitions, setShowAllDefinitions] = useState(false);
   const [showForms, setShowForms] = useState(false);
 
@@ -179,6 +202,11 @@ export function WordTooltip({
       );
       const data = await res.json();
       setDictionaryResult(data);
+
+      // Set saved state if word is already in vocabulary
+      if (data.alreadySaved) {
+        setIsSaved(true);
+      }
 
       // Auto-trigger AI if:
       // 1. Word not found in dictionary, OR
@@ -218,17 +246,28 @@ export function WordTooltip({
         }),
       });
 
+      const responseData = await res.json();
+
       if (!res.ok) {
-        const error = await res.json();
-        if (error.error?.includes("duplicate")) {
-          toast({
-            title: "Word already saved",
-            description: "This word is already in your vocabulary",
-          });
+        if (responseData.error?.includes("already saved")) {
+          // Word (or its lemma) is already saved
           setIsSaved(true);
+          if (responseData.contextAdded) {
+            setContextAdded(true);
+            toast({
+              title: "Context added",
+              description: "This word was already in your vocabulary. New context has been added.",
+              variant: "success",
+            });
+          } else {
+            toast({
+              title: "Word already saved",
+              description: "This word is already in your vocabulary",
+            });
+          }
           return;
         }
-        throw new Error(error.error || "Failed to save");
+        throw new Error(responseData.error || "Failed to save");
       }
 
       setIsSaved(true);
@@ -249,6 +288,60 @@ export function WordTooltip({
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleAddContext = async () => {
+    if (!contextSentence) {
+      toast({
+        title: "No context available",
+        description: "Cannot add context from this location",
+        variant: "error",
+      });
+      return;
+    }
+
+    setIsAddingContext(true);
+    try {
+      const res = await fetch("/api/vocabulary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          word,
+          contextSentence,
+          targetLanguage,
+          sourceArticleId: articleId,
+          addContextOnly: true,
+        }),
+      });
+
+      if (res.ok || res.status === 409) {
+        const data = await res.json();
+        if (data.contextAdded) {
+          setContextAdded(true);
+          toast({
+            title: "Context added!",
+            description: "New context sentence has been saved",
+            variant: "success",
+          });
+        } else {
+          toast({
+            title: "Context already exists",
+            description: "This context was already saved",
+          });
+        }
+      } else {
+        throw new Error("Failed to add context");
+      }
+    } catch (error) {
+      toast({
+        title: "Failed to add context",
+        description:
+          error instanceof Error ? error.message : "Please try again",
+        variant: "error",
+      });
+    } finally {
+      setIsAddingContext(false);
     }
   };
 
@@ -667,6 +760,90 @@ export function WordTooltip({
                       <span className="text-[#4a4a4a]">{value}</span>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Already saved / Lemma relationship section */}
+          {dictionaryResult.alreadySaved && dictionaryResult.savedWordInfo && (
+            <div className="mb-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+              {/* Form relationship note */}
+              {dictionaryResult.formRelation && (
+                <p className="text-xs text-emerald-700 mb-2 italic">
+                  &ldquo;{word}&rdquo; is the {dictionaryResult.formRelation}
+                </p>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-emerald-600" />
+                  <span className="text-sm font-medium text-emerald-800">
+                    Already in vocabulary
+                  </span>
+                </div>
+
+                {/* Mastery indicator */}
+                <div className="flex items-center gap-1.5">
+                  {[0, 1, 2, 3, 4].map((level) => (
+                    <div
+                      key={level}
+                      className={cn(
+                        "w-1.5 h-1.5 rounded-full",
+                        level < (dictionaryResult.savedWordInfo?.masteryLevel || 0)
+                          ? "bg-emerald-500"
+                          : "bg-emerald-200"
+                      )}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div className="mt-2 flex items-center gap-3 text-xs text-emerald-600">
+                <span>
+                  Seen {dictionaryResult.savedWordInfo.encounterCount} time
+                  {dictionaryResult.savedWordInfo.encounterCount !== 1 ? "s" : ""}
+                </span>
+                {dictionaryResult.savedWordInfo.formsSeen.length > 1 && (
+                  <span>
+                    Forms: {dictionaryResult.savedWordInfo.formsSeen.slice(0, 3).join(", ")}
+                    {dictionaryResult.savedWordInfo.formsSeen.length > 3 ? "..." : ""}
+                  </span>
+                )}
+              </div>
+
+              {/* Add context button */}
+              {contextSentence && !contextAdded && (
+                <button
+                  onClick={handleAddContext}
+                  disabled={isAddingContext}
+                  className={cn(
+                    "mt-2 w-full py-1.5 px-3 rounded-md text-xs font-medium",
+                    "bg-emerald-100 text-emerald-700 hover:bg-emerald-200",
+                    "transition-colors duration-200",
+                    "disabled:opacity-50 disabled:cursor-not-allowed",
+                    "flex items-center justify-center gap-1.5"
+                  )}
+                >
+                  {isAddingContext ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>Adding context...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Bookmark className="h-3 w-3" />
+                      <span>Add this context</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {contextAdded && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600">
+                  <Check className="h-3 w-3" />
+                  <span>Context added</span>
                 </div>
               )}
             </div>
